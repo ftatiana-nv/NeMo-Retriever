@@ -11,16 +11,16 @@ Each database in spider2-lite becomes a DuckDB schema, so you can query:
 
 Run once per machine (from the repo root):
 
-    python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py
+    python3 nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py
 
 Optional flags:
 
-    python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py \\
+    python3 nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py \\
         --spider2-dir ~/my_spider2 --db ./my.duckdb --overwrite
 
 After this completes, query via DuckDBEngine:
 
-    from nemo_retriever.structured_query.duckdb_engine import DuckDBEngine
+    from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
     engine = DuckDBEngine(database="./spider2.duckdb")
     rows = engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
 """
@@ -68,7 +68,7 @@ def _clone_spider2(target_dir: Path) -> None:
 
 def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     try:
-        from nemo_retriever.structured_query.duckdb_engine import DuckDBEngine
+        from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
     except ImportError:
         print(
             "\n[error] Could not import nemo_retriever. Install the package first:\n\n"
@@ -116,24 +116,6 @@ def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     return summary
 
 
-def _print_next_steps(db_path: Path) -> None:
-    print(f"""
-┌─────────────────────────────────────────────────────────────────┐
-│  Setup complete!  Next steps:                                   │
-│                                                                 │
-│  Inspect schemas (one per Spider2-lite database):               │
-│    retriever structured-query list-tables \\                     │
-│        --database {str(db_path):<43} │
-│                                                                 │
-│  Query via Python (bring your own LLM):                        │
-│    from nemo_retriever.structured_query.duckdb_engine import \\ │
-│        DuckDBEngine                                             │
-│    engine = DuckDBEngine(database="{str(db_path)}")  │
-│    rows = engine.execute(                                       │
-│        "SELECT * FROM Airlines.flights LIMIT 5")               │
-│                                                                 │
-│  See SPIDER2_SETUP.md for the full guide.                       │
-└─────────────────────────────────────────────────────────────────┘""")
 
 
 # ---------------------------------------------------------------------------
@@ -165,12 +147,6 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help="Drop and recreate schemas that already exist.",
     )
-    parser.add_argument(
-        "--skip-clone",
-        action="store_true",
-        default=False,
-        help="Skip the git clone step (Spider2 already present at --spider2-dir).",
-    )
     return parser.parse_args()
 
 
@@ -190,11 +166,11 @@ def main() -> None:
     print(f"  Overwrite        : {args.overwrite}")
     print("=" * 60 + "\n")
 
-    if not args.skip_clone:
+    if not spider2_dir.exists():
         _clone_spider2(spider2_dir)
 
     _load_data(spider2_lite_dir, db_path, overwrite=args.overwrite)
-    _print_next_steps(db_path)
+    print(f"Setup complete. Database written to: {db_path}")
 
 
 if __name__ == "__main__":

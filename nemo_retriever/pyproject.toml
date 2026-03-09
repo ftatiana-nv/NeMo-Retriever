@@ -80,6 +80,7 @@ dependencies = [
   "nvidia-ml-py",
   "vllm==0.16.0",
   "duckdb>=1.2.0",
+  "neo4j>=5.0",
 ]
 
 [project.optional-dependencies]
