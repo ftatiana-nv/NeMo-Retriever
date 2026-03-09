@@ -12,7 +12,7 @@ Example
 -------
 ::
 
-    from nemo_retriever.structured_query.duckdb_engine import DuckDBEngine
+    from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
 
     engine = DuckDBEngine()
     engine.register_file("orders", "/data/orders.parquet")
@@ -58,90 +58,6 @@ class DuckDBEngine:
         db_path = database or ":memory:"
         self._conn = duckdb.connect(database=db_path, read_only=read_only)
         logger.debug("DuckDB connected (database=%r, read_only=%s).", db_path, read_only)
-
-    # ------------------------------------------------------------------
-    # Registration helpers
-    # ------------------------------------------------------------------
-
-    def register_dataframe(self, table_name: str, df: pd.DataFrame) -> None:
-        """Register a pandas DataFrame as a virtual DuckDB table.
-
-        Parameters
-        ----------
-        table_name:
-            Name to use in SQL queries.
-        df:
-            DataFrame to register.
-        """
-        self._conn.register(table_name, df)
-        logger.debug("Registered DataFrame as table '%s' (%d rows).", table_name, len(df))
-
-    def register_file(
-        self,
-        table_name: str,
-        file_path: Union[str, Path],
-    ) -> None:
-        """Register a CSV, Parquet, or JSON file as a virtual DuckDB view.
-
-        The file format is inferred from the file extension:
-        - ``.csv`` → ``read_csv_auto``
-        - ``.parquet`` or ``.pq`` → ``read_parquet``
-        - ``.json`` or ``.ndjson`` → ``read_json_auto``
-
-        Parameters
-        ----------
-        table_name:
-            Name to use in SQL queries.
-        file_path:
-            Path to the data file.
-        """
-        path = Path(file_path)
-        ext = path.suffix.lower()
-        escaped = str(path).replace("'", "''")
-
-        if ext == ".csv":
-            reader = f"read_csv_auto('{escaped}')"
-        elif ext in (".parquet", ".pq"):
-            reader = f"read_parquet('{escaped}')"
-        elif ext in (".json", ".ndjson", ".jsonl"):
-            reader = f"read_json_auto('{escaped}')"
-        else:
-            raise ValueError(
-                f"Unsupported file extension '{ext}'. "
-                "Supported: .csv, .parquet, .pq, .json, .ndjson, .jsonl"
-            )
-
-        self._conn.execute(f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM {reader}")
-        logger.debug("Registered file '%s' as view '%s'.", file_path, table_name)
-
-    def register_directory(
-        self,
-        table_name: str,
-        directory: Union[str, Path],
-        pattern: str = "*.parquet",
-    ) -> None:
-        """Register all files matching *pattern* in *directory* as a single view.
-
-        Parameters
-        ----------
-        table_name:
-            Name to use in SQL queries.
-        directory:
-            Directory path to scan.
-        pattern:
-            Glob pattern for files to include (default: ``*.parquet``).
-        """
-        dir_path = Path(directory)
-        escaped = str(dir_path / pattern).replace("'", "''")
-        self._conn.execute(
-            f"CREATE OR REPLACE VIEW {table_name} AS SELECT * FROM read_parquet('{escaped}')"
-        )
-        logger.debug(
-            "Registered directory '%s' (pattern=%r) as view '%s'.",
-            directory,
-            pattern,
-            table_name,
-        )
 
     # ------------------------------------------------------------------
     # Execution
@@ -191,17 +107,6 @@ class DuckDBEngine:
         """Return names of all tables and views registered in this connection."""
         rows = self.execute("SHOW TABLES")
         return [r.get("name", "") for r in rows]
-
-    def schema(self, table_name: str) -> List[Dict[str, str]]:
-        """Return column names and types for *table_name*.
-
-        Returns
-        -------
-        list[dict]
-            Each element has keys ``column_name`` and ``column_type``.
-        """
-        rows = self.execute(f"DESCRIBE {table_name}")
-        return [{"column_name": r.get("column_name"), "column_type": r.get("column_type")} for r in rows]
 
     # ------------------------------------------------------------------
     # Spider2 bulk loaders

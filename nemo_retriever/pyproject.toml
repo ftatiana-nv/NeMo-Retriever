@@ -72,6 +72,7 @@ dependencies = [
   "scipy>=1.11.0",
   "nvidia-ml-py",
   "duckdb>=1.2.0",
+  "neo4j>=5.0",
 ]
 
 [project.optional-dependencies]
