@@ -45,7 +45,7 @@ source .venv/bin/activate   # macOS / Linux
 Install the package without heavy ML dependencies (only `duckdb` is needed for setup):
 
 ```bash
-uv pip install -e nemo_retriever/ --no-deps
+uv pip install -e nemo_retriever
 uv pip install duckdb
 ```
 
@@ -54,24 +54,18 @@ uv pip install duckdb
 ## 3 — Run the one-time setup script
 
 ```bash
-python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py
+python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py
 ```
 
 This script will:
-1. **Clone Spider2** from GitHub into `~/spider2` (shallow clone)
+1. **Clone Spider2** from GitHub into `~/spider2` (shallow clone) — skipped automatically if the directory already exists
 2. **Load all 30 databases** from `spider2-lite/resource/databases/sqlite/` into `spider2.duckdb`
 3. **Print a summary** of every schema created
-
-### Spider2 already cloned?
-
-```bash
-python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py --skip-clone
-```
 
 ### Custom paths
 
 ```bash
-python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py \
+python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py \
     --spider2-dir ~/projects/spider2 \
     --db ~/data/spider2.duckdb
 ```
@@ -83,27 +77,16 @@ python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py \
 | `--spider2-dir` | `~/spider2` | Root of the Spider2 repository |
 | `--db` | `./spider2.duckdb` | DuckDB database file to create or update |
 | `--overwrite` | off | Drop and recreate schemas that already exist |
-| `--skip-clone` | off | Skip the git clone step |
 
 ---
 
 ## 4 — Verify the data loaded
 
-```bash
-# List all schemas (one per Spider2-lite database)
-retriever structured-query list-tables --database ./spider2.duckdb
-
-# Show columns for a specific schema
-retriever structured-query list-tables --database ./spider2.duckdb --schema
-```
-
-Or directly in Python:
-
 ```python
-from nemo_retriever.structured_query.duckdb_engine import DuckDBEngine
+from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
 
 engine = DuckDBEngine(database="./spider2.duckdb")
-print(engine.list_schemas())          # ['Airlines', 'Baseball', 'chinook', ...]
+print(engine.list_schemas())             # ['Airlines', 'Baseball', 'chinook', ...]
 print(engine.schema_tables("Airlines"))  # ['flights', 'airports_data', ...]
 engine.close()
 ```
@@ -115,7 +98,7 @@ engine.close()
 Each Spider2-lite database is a schema. Reference tables as `<Schema>.<table>`:
 
 ```python
-from nemo_retriever.structured_query.duckdb_engine import DuckDBEngine
+from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
 
 engine = DuckDBEngine(database="./spider2.duckdb")
 
@@ -158,7 +141,7 @@ Use Spider2's evaluator to score predictions:
 
 ```bash
 cd ~/spider2/spider2-lite/evaluation_suite
-python3 evaluate.py --predictions ./results.json
+python evaluate.py --predictions ./results.json
 ```
 
 ---
@@ -177,8 +160,7 @@ Then query via Python using `DuckDBEngine` as shown in Step 5.
 
 ```bash
 cd ~/spider2 && git pull
-python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py \
-    --skip-clone --overwrite
+python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py --overwrite
 ```
 
 ---
@@ -186,7 +168,7 @@ python3 nemo_retriever/src/nemo_retriever/structured_query/setup_spider2.py \
 ## Troubleshooting
 
 **`zsh: command not found: python`**
-Use `python3` on macOS.
+Use `python` on macOS.
 
 **`Could not import nemo_retriever`**
 ```bash
