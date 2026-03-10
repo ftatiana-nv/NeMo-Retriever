@@ -40,5 +40,5 @@ def parse_param(argv):
 
 
 # settings = parse_param(sys.argv)
-settings = {"data_interval_start": pendulum.parse("2026-03-01"), "data_interval_end": pendulum.parse("2026-03-02"), "connection_properties": {"database": "./spider2.duckdb"}}
-create_dataframe(settings)
+# settings = {"data_interval_start": pendulum.parse("2026-03-01"), "data_interval_end": pendulum.parse("2026-03-02"), "connection_properties": {"database": "./spider2.duckdb"}}
+# create_dataframe(settings)
