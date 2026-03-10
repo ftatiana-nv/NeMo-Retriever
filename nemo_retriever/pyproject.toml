@@ -50,8 +50,10 @@ dependencies = [
   "transformers>=5.0.0",
   "tokenizers>=0.20.3",
   "accelerate>=1.1.0",
-  "torch~=2.9.1",
-  "torchvision>=0.24,<0.25",
+  "torch~=2.9.1; sys_platform == 'linux'",
+  "torch>=2.0.0; sys_platform == 'darwin'",
+  "torchvision>=0.24,<0.25; sys_platform == 'linux'",
+  "torchvision>=0.19.0; sys_platform == 'darwin'",
   "einops",
   "easydict",
   "addict",
@@ -69,6 +71,8 @@ dependencies = [
   "soundfile>=0.12.0",
   "scipy>=1.11.0",
   "nvidia-ml-py",
+  "duckdb>=1.2.0",
+  "neo4j>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -91,8 +95,12 @@ nemotron-page-elements-v3 = { index = "test-pypi" }
 nemotron-graphic-elements-v1 = { index = "test-pypi" }
 nemotron-table-structure-v1 = { index = "test-pypi" }
 nemotron-ocr = { index = "test-pypi" }
-torch = { index = "torch-cuda"}
-torchvision = { index ="torch-cuda"}
+torch = [
+  { index = "torch-cuda", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+  { index = "torch-cuda", marker = "sys_platform == 'linux'" },
+]
 
 [[tool.uv.index]]
 name = "test-pypi"
