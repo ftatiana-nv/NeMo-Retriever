@@ -30,6 +30,20 @@ def create_dataframe(settings):
     return tables, columns, views, queries, pks, fks
 
 
+def data_for_populate_structured(settings):
+    """Build the `data` dict expected by populate_structured_data from create_dataframe output."""
+    tables, columns, views, queries, pks, fks = create_dataframe(settings)
+    data = {
+        "tables": tables,
+        "columns": columns,
+        "views": views,
+        "pks": pks,
+        "fks": fks,
+    }
+    # queries is not used by populate_structured_data; include if needed elsewhere
+    return data
+
+
 def parse_param(argv):
     ret = {}
     ret["data_interval_start"] = pendulum.parse(argv[1])
@@ -39,6 +53,15 @@ def parse_param(argv):
 
 
 
-# settings = parse_param(sys.argv)
-# settings = {"data_interval_start": pendulum.parse("2026-03-01"), "data_interval_end": pendulum.parse("2026-03-02"), "connection_properties": {"database": "./spider2.duckdb"}}
-# create_dataframe(settings)
+# Example: build data for populate_structured_data and call it
+from nemo_retriever.relational_db.population.populate_data import populate_structured_data
+
+settings = {"connection_properties": {"database": "./spider2.duckdb"}}
+data = data_for_populate_structured(settings)
+populate_structured_data(
+    data,
+    account_id="your_account_id",
+    num_workers=4,
+    dialect="duckdb",
+    keep_string_values=False,
+)
