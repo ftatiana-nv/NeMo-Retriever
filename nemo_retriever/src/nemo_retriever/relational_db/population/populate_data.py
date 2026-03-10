@@ -4,26 +4,26 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from db.dal import (
+from nemo_retriever.relational_db.population.db.dal import (
     db_exists,
     update_node_property,
     delete_schema,
     update_disconnected_sqls,
     update_diff_from_existing_schema,
 )
-from graph.indexes import add_indices
+from nemo_retriever.relational_db.population.graph.indexes import add_indices
 from concurrent.futures import ThreadPoolExecutor
 
-from graph.parsers import schemas_parser
-from graph.dal.schemas_dal import (
+from nemo_retriever.relational_db.population.graph.parsers import schemas_parser
+from nemo_retriever.relational_db.population.graph.dal.schemas_dal import (
     get_schemas_ids_and_names,
     add_fks,
     add_pks,
     delete_old_fks,
     reset_pks,
 )
-from graph.parsers.sql.parse_queries_df import populate_views
-from graph.services.schema import add_schema
+from nemo_retriever.relational_db.population.graph.parsers.sql.parse_queries_df import populate_views
+from nemo_retriever.relational_db.population.graph.services.schema import add_schema
 
 def populate_structured_data(
     data,
