@@ -118,11 +118,11 @@ class DuckDBEngine:
         """Return all tables from information_schema as a DataFrame."""
         return self.execute("""
             SELECT
-                table_catalog AS `database`,
-                table_schema  AS `schema`,
-                table_name    AS `table_name`,
-                table_type    AS `table_type`,
-                NULL          AS `created`
+                table_catalog AS "database",
+                table_schema  AS "schema",
+                table_name    AS "table_name",
+                table_type    AS "table_type",
+                NULL          AS "created"
             FROM information_schema.tables
             ORDER BY table_catalog, table_schema, table_name
         """)
@@ -131,13 +131,13 @@ class DuckDBEngine:
         """Return all columns from information_schema as a DataFrame."""
         return self.execute("""
             SELECT
-                table_catalog    AS `database`,
-                table_schema     AS `schema`,
-                table_name       AS `table_name`,
-                column_name      AS `column_name`,
-                ordinal_position AS `ordinal_position`,
-                data_type        AS `data_type`,
-                is_nullable      AS `is_nullable`
+                table_catalog    AS "database",
+                table_schema     AS "schema",
+                table_name       AS "table_name",
+                column_name      AS "column_name",
+                ordinal_position AS "ordinal_position",
+                data_type        AS "data_type",
+                is_nullable      AS "is_nullable"
             FROM information_schema.columns
             ORDER BY table_catalog, table_schema, table_name, ordinal_position
         """)
