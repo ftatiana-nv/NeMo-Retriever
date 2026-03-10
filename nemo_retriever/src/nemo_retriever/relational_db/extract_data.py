@@ -1,14 +1,13 @@
 import sys
 import pendulum
 import pandas as pd
-from structured_data import DuckDBEngine
+from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
 
 
 def create_dataframe(settings):
-    duckdb_connector = DuckDBEngine(settings["connection_properties"])
-    queries = duckdb_connector.get_queries(
-        settings["data_interval_start"], settings["data_interval_end"]
-    )
+    duckdb_connector = DuckDBEngine({"database": "./spider2.duckdb"})
+
+    queries = duckdb_connector.get_queries()
 
     schema = duckdb_connector.get_schemas()
     tables = schema[0]
@@ -39,5 +38,7 @@ def parse_param(argv):
     return ret
 
 
-settings = parse_param(sys.argv)
+
+# settings = parse_param(sys.argv)
+settings = {"data_interval_start": pendulum.parse("2026-03-01"), "data_interval_end": pendulum.parse("2026-03-02"), "connection_properties": {"database": "./spider2.duckdb"}}
 create_dataframe(settings)
