@@ -1,8 +1,5 @@
 # Put new items at the bottom of this list!!!
 
-# macOS
-.DS_Store
-
 # Created by https://www.gitignore.io/api/vim,c++,cmake,python,synology
 
 ### C++ ###
@@ -260,5 +257,3 @@ models/
 .env
 
 nemo_retriever/run_results/
-
-nemo_retriever/PIPELINE_FLOW.md

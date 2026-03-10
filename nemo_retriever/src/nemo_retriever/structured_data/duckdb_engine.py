@@ -84,11 +84,6 @@ class DuckDBEngine:
             for db in self.list_databases()
         ]
 
-    @property
-    def pull_info(self) -> List[Dict[str, Any]]:
-        """List of {db_name, schemas} for merging with tables/columns/views (e.g. in extract_data)."""
-        return self.test()
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -123,11 +118,11 @@ class DuckDBEngine:
         """Return all tables from information_schema as a DataFrame."""
         return self.execute("""
             SELECT
-                table_catalog AS "database",
-                table_schema  AS "schema",
-                table_name    AS "table_name",
-                table_type    AS "table_type",
-                NULL          AS "created"
+                table_catalog AS `database`,
+                table_schema  AS `schema`,
+                table_name    AS `table_name`,
+                table_type    AS `table_type`,
+                NULL          AS `created`
             FROM information_schema.tables
             ORDER BY table_catalog, table_schema, table_name
         """)
@@ -136,13 +131,13 @@ class DuckDBEngine:
         """Return all columns from information_schema as a DataFrame."""
         return self.execute("""
             SELECT
-                table_catalog    AS "database",
-                table_schema     AS "schema",
-                table_name       AS "table_name",
-                column_name      AS "column_name",
-                ordinal_position AS "ordinal_position",
-                data_type        AS "data_type",
-                is_nullable      AS "is_nullable"
+                table_catalog    AS `database`,
+                table_schema     AS `schema`,
+                table_name       AS `table_name`,
+                column_name      AS `column_name`,
+                ordinal_position AS `ordinal_position`,
+                data_type        AS `data_type`,
+                is_nullable      AS `is_nullable`
             FROM information_schema.columns
             ORDER BY table_catalog, table_schema, table_name, ordinal_position
         """)
@@ -166,69 +161,6 @@ class DuckDBEngine:
             FROM information_schema.views
             ORDER BY table_catalog, table_schema, table_name
         """)
-
-    def get_pks(self) -> pd.DataFrame:
-        """Return primary key columns from duckdb_constraints() as a DataFrame.
-
-        Columns: database, schema, table_name, column_name, ordinal_position.
-        If duckdb_constraints() is unavailable, returns an empty DataFrame with those columns.
-        """
-        empty = pd.DataFrame(
-            columns=["database", "schema", "table_name", "column_name", "ordinal_position"]
-        )
-        try:
-            # duckdb_constraints() returns constraint_column_names as list; unnest to one row per column
-            df = self.execute("""
-                SELECT
-                    current_database() AS "database",
-                    c.schema_name      AS "schema",
-                    c.table_name       AS "table_name",
-                    unnest(c.constraint_column_names) AS "column_name",
-                    unnest(range(1, len(c.constraint_column_names) + 1)) AS "ordinal_position"
-                FROM duckdb_constraints() c
-                WHERE c.constraint_type = 'PRIMARY KEY'
-                ORDER BY c.schema_name, c.table_name, "ordinal_position"
-            """)
-            return df if not df.empty else empty
-        except Exception:
-            return empty
-
-    def get_fks(self) -> pd.DataFrame:
-        """Return foreign key columns from duckdb_constraints() as a DataFrame.
-
-        Columns: database, schema, table_name, column_name, and referenced_* if available.
-        If duckdb_constraints() is unavailable, returns an empty DataFrame with standard columns.
-        """
-        empty = pd.DataFrame(
-            columns=[
-                "database", "schema", "table_name", "column_name",
-                "referenced_schema", "referenced_table", "referenced_column",
-            ]
-        )
-        try:
-            df = self.execute("""
-                SELECT
-                    current_database() AS "database",
-                    c.schema_name      AS "schema",
-                    c.table_name       AS "table_name",
-                    unnest(c.constraint_column_names) AS "column_name"
-                FROM duckdb_constraints() c
-                WHERE c.constraint_type = 'FOREIGN KEY'
-                ORDER BY c.schema_name, c.table_name
-            """)
-            if not df.empty and "referenced_table_name" in self.execute("SELECT * FROM duckdb_constraints() LIMIT 1").columns:
-                ref = self.execute("""
-                    SELECT schema_name, table_name, constraint_column_names
-                    FROM duckdb_constraints()
-                    WHERE constraint_type IN ('FOREIGN KEY', 'PRIMARY KEY', 'UNIQUE')
-                """)
-                # Simplified: return FK side only; referenced_* can be extended if DuckDB exposes it
-                for col in ["referenced_schema", "referenced_table", "referenced_column"]:
-                    if col not in df.columns:
-                        df[col] = None
-            return df if not df.empty else empty
-        except Exception:
-            return empty
 
     # ------------------------------------------------------------------
     # Context manager / cleanup
