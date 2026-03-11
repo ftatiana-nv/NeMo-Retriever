@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from shared.graph.model.reserved_words import Labels
-from shared.graph.model.node import Node
-from shared.graph.model.schema import Schema, TEMP_SCHEMA_NAME
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.schema import Schema, TEMP_SCHEMA_NAME
 import logging
 
 logger = logging.getLogger("schemas_parser.py")

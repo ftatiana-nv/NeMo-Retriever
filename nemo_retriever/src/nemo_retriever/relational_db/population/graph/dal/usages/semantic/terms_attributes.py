@@ -1,9 +1,9 @@
-from shared.graph.dal.usages.data.columns import (
+from nemo_retriever.relational_db.population.graph.dal.usages.data.columns import (
     get_column_queries_cypher,
     get_column_usage_parameters,
     batch_params,
 )
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 import logging
 
 logger = logging.getLogger("usages/terms_attributes.py")

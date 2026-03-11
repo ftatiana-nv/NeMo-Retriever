@@ -2,16 +2,16 @@ from datetime import datetime
 import logging
 
 import pandas as pd
-from nemo_retriever.vector_store.neo4j_store import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
-from graph.dal.utils_dal import get_entity_before_update
-from graph.utils import chunks
-from graph.model.reserved_words import Labels, SQLType, label_to_type
-from graph.dal.schemas_dal import load_schema_from_graph, add_schemas_edge
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import get_entity_before_update
+from nemo_retriever.relational_db.population.graph.utils import chunks
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, SQLType, label_to_type
+from nemo_retriever.relational_db.population.graph.dal.schemas_dal import load_schema_from_graph, add_schemas_edge
 
-from graph.model.schema import TEMP_SCHEMA_NAME
+from nemo_retriever.relational_db.population.graph.model.schema import TEMP_SCHEMA_NAME
 conn = get_neo4j_conn()
 
 

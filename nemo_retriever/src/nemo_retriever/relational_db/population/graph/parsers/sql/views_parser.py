@@ -6,17 +6,17 @@ import codecs
 import pandas as pd
 from sqloxide import parse_sql
 
-from shared.graph.model.query import Query
-from shared.graph.model.reserved_words import SQLType
-from shared.graph.parsers.sql import sql_view_parser
-from shared.graph.dal.queries_dal import (
+from nemo_retriever.relational_db.population.graph.model.query import Query
+from nemo_retriever.relational_db.population.graph.model.reserved_words import SQLType
+from nemo_retriever.relational_db.population.graph.parsers.sql import sql_view_parser
+from nemo_retriever.relational_db.population.graph.dal.queries_dal import (
     get_sql_by_full_query,
     update_counters_and_timestamps_for_query_and_affected_data,
 )
-from shared.graph.services.queries_comparison.queries_comparison import (
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.queries_comparison import (
     find_identical_queries,
 )
-from shared.graph.parsers.sql.queries_parser import parse_single
+from nemo_retriever.relational_db.population.graph.parsers.sql.queries_parser import parse_single
 
 logger = logging.getLogger("queries_parser.py")
 keep_string_values = False

@@ -1,12 +1,11 @@
 import networkx as nx
 import logging
 import pandas as pd
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 from collections import ChainMap
 import ast
-from shared.graph.parsers import sql
-
-from shared.graph.utils import flat_list_recursive
+from nemo_retriever.relational_db.population.graph.parsers import sql
+from nemo_retriever.relational_db.population.graph.utils import flat_list_recursive
 
 conn = get_neo4j_conn()
 

@@ -1,21 +1,29 @@
-from infra.Neo4jConnection import get_neo4j_conn
-from notifications.log_dal import produce_signals_bulk
-from notifications.types import Events, Actions, NotificationClassification
-from shared.graph.services.sql_snippet import parse_analysis
-from shared.graph.model.reserved_words import Labels
-from shared.graph.dal.usage_dal import get_count_str_by_month
-from shared.graph.services.queries_comparison.queries_comparison import (
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.services.sql_snippet import (
+    parse_analysis,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.dal.usage_dal import (
+    get_count_str_by_month,
+)
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.queries_comparison import (
     find_identical_queries,
 )
-from shared.graph.dal.tables_dal import load_sqls_to_tables
-from shared.graph.parsers.sql.queries_parser import parse_single
-from shared.graph.dal.utils_dal import get_analyses_queries
+from nemo_retriever.relational_db.population.graph.dal.tables_dal import (
+    load_sqls_to_tables,
+)
+from nemo_retriever.relational_db.population.graph.parsers.sql.queries_parser import (
+    parse_single,
+)
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import (
+    get_analyses_queries,
+)
 
 import logging
 import datetime
 import numpy as np
 import pandas as pd
-from shared.graph.model.reserved_words import SQLType
+from nemo_retriever.relational_db.population.graph.model.reserved_words import SQLType
 
 conn = get_neo4j_conn()
 logger = logging.getLogger("analysis_dal.py")
@@ -90,32 +98,13 @@ def recommend_analysis(account_id: str):
                 CREATE (an:analysis{{name: "recommended_analysis_" + node.id, account_id: $account_id, recommended: true, id: randomUUID(), sql: node.sql_full_query, label:'analysis'}}) - [:analysis_of] -> (node) 
                 RETURN collect({{id:node.id, query_text:node.sql_full_query, usage: {cnt_str}}}) as queries
                 """
-        result = conn.query_write(
+        conn.query_write(
             query=query,
             parameters={
                 "account_id": account_id,
                 "new_recommendations": new_recommendations,
             },
-        )[0]["queries"]
-
-        if len(result) > 0:
-            queries_logs = [
-                {
-                    "id": query["id"],
-                    "before_update": None,
-                    "payload": {"query": query["query_text"], "usage": query["usage"]},
-                }
-                for query in result
-            ]
-            produce_signals_bulk(
-                account_id,
-                Events.RECOMMENDATION,
-                Actions.SAVE,
-                Labels.ANALYSIS,
-                queries_logs,
-                None,
-                NotificationClassification.RECOMMENDATION.OPPORTUNITY,
-            )
+        )
 
 
 def preprocess_invalid_analysis(account_id):

@@ -1,4 +1,4 @@
-from shared.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.node import Node
 from .reserved_words import Labels, DataTypes  # , get_types_families
 from .snippet import Snippet
 import pandas as pd

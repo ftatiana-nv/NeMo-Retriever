@@ -1,7 +1,10 @@
 import uuid
 from typing import Literal
-from shared.graph.model.reserved_words import SQLType, Labels
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    SQLType,
+    Labels,
+)
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 conn = get_neo4j_conn()
 

@@ -1,21 +1,32 @@
 import pandas as pd
-from shared.graph.model.snippet import Snippet
-from shared.graph.services.sql_snippet import get_all_joins
-from shared.graph.dal.metrics_dal import (
+from nemo_retriever.relational_db.population.graph.model.snippet import Snippet
+from nemo_retriever.relational_db.population.graph.services.sql_snippet import (
+    get_all_joins,
+)
+from nemo_retriever.relational_db.population.graph.dal.metrics_dal import (
     retrieve_metrics_subgraphs,
     connect_metric_sql_edges,
     get_snippets_of_bi_fields,
 )
-from shared.graph.utils import remove_redundant_parentheses
+from nemo_retriever.relational_db.population.graph.utils import (
+    remove_redundant_parentheses,
+)
 import networkx as nx
-from shared.graph.parsers.sql.op_name_to_symbol import get_symbol
+from nemo_retriever.relational_db.population.graph.parsers.sql.op_name_to_symbol import (
+    get_symbol,
+)
 import logging
-from shared.graph.model.reserved_words import unimportant_funcs_for_description
-from shared.graph.model.node import clean_phrase
-from shared.graph.model.metric import Metric
-from shared.graph.cte.common import construct_sql_from_field
-
-from shared.graph.dal.terms_dal import get_bt_name_by_attr_id
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    unimportant_funcs_for_description,
+)
+from nemo_retriever.relational_db.population.graph.model.node import clean_phrase
+from nemo_retriever.relational_db.population.graph.model.metric import Metric
+from nemo_retriever.relational_db.population.graph.cte.common import (
+    construct_sql_from_field,
+)
+from nemo_retriever.relational_db.population.graph.dal.terms_dal import (
+    get_bt_name_by_attr_id,
+)
 from functools import reduce
 
 
