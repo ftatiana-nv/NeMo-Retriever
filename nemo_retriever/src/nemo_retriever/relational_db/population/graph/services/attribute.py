@@ -1,10 +1,14 @@
-from shared.graph.services.sql_snippet import save_custom_snippet
-from shared.graph.utils import remove_redundant_parentheses
-from shared.graph.dal.attribute_dal import (
+from nemo_retriever.relational_db.population.graph.services.sql_snippet import (
+    save_custom_snippet,
+)
+from nemo_retriever.relational_db.population.graph.utils import (
+    remove_redundant_parentheses,
+)
+from nemo_retriever.relational_db.population.graph.dal.attribute_dal import (
     save_attr,
     connect_attribute_to_file as dal_connect_attribute_to_file,
 )
-from shared.graph.dal.usages.semantic.terms_attributes import (
+from nemo_retriever.relational_db.population.graph.dal.usages.semantic.terms_attributes import (
     update_single_attr_usage,
     update_single_term_usage,
 )

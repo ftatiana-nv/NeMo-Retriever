@@ -1,5 +1,8 @@
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.graph.model.reserved_words import SQLType, Parser
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    SQLType,
+    Parser,
+)
 import logging
 
 logger = logging.getLogger("usages/columns_usage.py")

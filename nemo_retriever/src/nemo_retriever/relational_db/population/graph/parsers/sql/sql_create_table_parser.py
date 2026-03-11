@@ -1,11 +1,19 @@
-from shared.graph.parsers.sql import sql_select_parser as sql_select
-from shared.graph.model.reserved_words import Props, Labels, label_to_type
-from shared.graph.model.node import Node
-from shared.graph.model.schema import TEMP_SCHEMA_NAME
-
-# from shared.graph.dal.schemas_dal import add_schemas_edge
-from shared.graph.model.query import MissingDataError
-from shared.graph.model.query import Query
+from nemo_retriever.relational_db.population.graph.parsers.sql import (
+    sql_select_parser as sql_select,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    Props,
+    Labels,
+    label_to_type,
+)
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.schema import (
+    TEMP_SCHEMA_NAME,
+)
+from nemo_retriever.relational_db.population.graph.model.query import (
+    MissingDataError,
+    Query,
+)
 from typing import Callable
 
 

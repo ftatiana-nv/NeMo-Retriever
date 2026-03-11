@@ -1,32 +1,44 @@
 from pandas import DataFrame
 from typing import Literal
 
-from shared.graph.dal.sql_snippet_dal import (
+from nemo_retriever.relational_db.population.graph.dal.sql_snippet_dal import (
     get_upstream_source,
     replace_definition_sql,
     save_custom_snippet_in_graph,
     save_analysis_in_graph,
     delete_snippet,
 )
-from shared.graph.utils import remove_redundant_parentheses
-
-from shared.graph.dal.tables_dal import get_join_columns
-from shared.graph.parsers.sql.queries_parser import parse_single
-from shared.graph.services.queries_comparison.queries_comparison import (
+from nemo_retriever.relational_db.population.graph.utils import (
+    remove_redundant_parentheses,
+)
+from nemo_retriever.relational_db.population.graph.dal.tables_dal import (
+    get_join_columns,
+)
+from nemo_retriever.relational_db.population.graph.parsers.sql.queries_parser import (
+    parse_single,
+)
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.queries_comparison import (
     find_identical_queries,
 )
-from shared.graph.dal.utils_dal import (
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import (
     prepare_edge,
     add_edges,
 )
-from shared.graph.dal.usages.semantic.terms_attributes import (
+from nemo_retriever.relational_db.population.graph.dal.usages.semantic.terms_attributes import (
     update_single_attr_usage,
     update_single_term_usage,
     update_certified_for_zones,
     update_document_reference_certified_for_zones,
 )
-from shared.graph.model.reserved_words import Labels, SQLType
-from shared.graph.model.query import Query, NotSelectSqlTypeError, NoFKError
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    Labels,
+    SQLType,
+)
+from nemo_retriever.relational_db.population.graph.model.query import (
+    Query,
+    NotSelectSqlTypeError,
+    NoFKError,
+)
 
 
 import logging

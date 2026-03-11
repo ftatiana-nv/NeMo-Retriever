@@ -2,10 +2,10 @@ from networkx import DiGraph
 from pandas import DataFrame
 from typing import Callable, Union
 
-from shared.graph.dal.queries_dal import get_sql_by_id
-from shared.graph.model.query import Query
-from shared.graph.model.reserved_words import SQLType
-from shared.graph.services.queries_comparison.compare_queries import (
+from nemo_retriever.relational_db.population.graph.dal.queries_dal import get_sql_by_id
+from nemo_retriever.relational_db.population.graph.model.query import Query
+from nemo_retriever.relational_db.population.graph.model.reserved_words import SQLType
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.compare_queries import (
     compare_query_to_list_of_queries,
     get_slim_graph_from_edges,
 )

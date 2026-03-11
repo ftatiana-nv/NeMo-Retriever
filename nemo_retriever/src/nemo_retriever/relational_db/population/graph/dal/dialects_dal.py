@@ -1,6 +1,10 @@
-from shared.graph.parsers.connection_type_to_dialect_mapper import conn_to_dialect_map
-from shared.graph.model.reserved_words import BiConnectors
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.parsers.connection_type_to_dialect_mapper import (
+    conn_to_dialect_map,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    BiConnectors,
+)
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 import logging
 
 logger = logging.getLogger("dialects_dal.py")

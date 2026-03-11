@@ -35,7 +35,7 @@ def populate_structured_data(
     logger.info("Using Dialect: " + dialect)
 
     # Make sure that the indices exist in the graph database
-    add_indices()
+    add_indices(account_id) 
 
     all_schemas = {}
 
@@ -65,7 +65,7 @@ def populate_structured_data(
         )
     # Do garbage collection after updating the graph:
     # Search for SQLs that got disconnected from the DB tree
-    update_disconnected_sqls(account_id)
+    # update_disconnected_sqls(account_id)
 
     if "fks" in data:
         populate_fks(account_id, fks=data["fks"])

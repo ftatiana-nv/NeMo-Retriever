@@ -1,5 +1,5 @@
-from shared.graph.model.node import Node
-from shared.graph.model.reserved_words import Labels, SQLType, SQL, Props, Parser
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, SQLType, SQL, Props, Parser
 from typing import Union, Type, Self
 import pendulum
 

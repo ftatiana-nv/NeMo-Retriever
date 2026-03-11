@@ -1,8 +1,10 @@
-from shared.graph.dal.usages.data.queries import calculate_queries_usage
-from shared.graph.dal.usages.data.columns import (
+from nemo_retriever.relational_db.population.graph.dal.usages.data.queries import (
+    calculate_queries_usage,
+)
+from nemo_retriever.relational_db.population.graph.dal.usages.data.columns import (
     calculate_column_queries_and_usage,
 )
-from shared.graph.dal.usages.data.tables import (
+from nemo_retriever.relational_db.population.graph.dal.usages.data.tables import (
     calculate_tables_queries_and_usage,
 )
 import logging

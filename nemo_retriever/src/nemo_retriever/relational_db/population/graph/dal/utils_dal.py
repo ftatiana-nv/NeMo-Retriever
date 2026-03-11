@@ -1,8 +1,8 @@
 import logging
 
-from shared.graph.model.query import Query, NestedPropertyError
-from shared.graph.model.node import Node
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.query import Query, NestedPropertyError
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     Props,
     Labels,
     label_to_type,
@@ -10,11 +10,7 @@ from shared.graph.model.reserved_words import (
     data_relationships,
     BiConnectors,
 )
-from infra.Neo4jConnection import get_neo4j_conn
-from notifications.certification_dal import get_certification
-from notifications.queries_dal import get_num_of_queries_by_label
-from notifications.types import EntitiesFamilies
-from notifications.utils import get_entity_family
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 logger = logging.getLogger("utils_dal.py")
 conn = get_neo4j_conn()
@@ -307,16 +303,6 @@ def get_entity_before_update(account_id: str, node_id: str, label: Labels):
         if owner_id:
             entity_before_update["owner_id"] = owner_id
 
-    is_semantic_entity = get_entity_family(label) == EntitiesFamilies.SEMANTIC_OBJECTS
-    is_data_entity = get_entity_family(label) == EntitiesFamilies.DATA_OBJECTS
-    if is_semantic_entity is True:
-        entity_before_update["certified"] = get_certification(
-            label, account_id, node_id
-        )
-    if is_data_entity:
-        entity_before_update["num_of_queries"] = get_num_of_queries_by_label(
-            account_id, node_id, label
-        )["num_of_queries"]
     remove_embeddings_keys(entity_before_update)
     return entity_before_update
 
