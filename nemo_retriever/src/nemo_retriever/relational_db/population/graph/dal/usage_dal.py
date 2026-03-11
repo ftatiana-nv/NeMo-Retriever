@@ -1,9 +1,13 @@
 import logging
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 import numpy as np
 from datetime import date, timedelta
 from cachetools import cached, TTLCache
-from shared.graph.model.reserved_words import SQLType, Labels, UsageDesc
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    SQLType,
+    Labels,
+    UsageDesc,
+)
 
 
 conn = get_neo4j_conn()

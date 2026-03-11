@@ -4,9 +4,9 @@ from networkx import Graph, DiGraph
 from networkx.algorithms.isomorphism import DiGraphMatcher
 from typing import Callable
 
-from shared.graph.model.query import Query
-from shared.graph.model.reserved_words import Labels
-from shared.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.query import Query
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.node import Node
 
 logger = logging.getLogger("compare_queries.py")
 

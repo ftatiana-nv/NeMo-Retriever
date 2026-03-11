@@ -1,11 +1,11 @@
-from shared.graph.dal.usage_dal import (
+from nemo_retriever.relational_db.population.graph.dal.usage_dal import (
     get_columns_usage_percentiles,
     get_node_usage_percentiles,
     get_tables_usage_percentiles,
     get_usage_percentiles,
     usage_entities,
 )
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     SQLType,
     Labels,
     UsageDesc,
@@ -16,8 +16,13 @@ from shared.graph.model.reserved_words import (
 import logging
 from nltk.corpus import wordnet  # nltk.download("wordnet")
 
-from shared.graph.dal.metrics_dal import get_metrics_related_zones_cypher
-from shared.graph.dal.attribute_dal import get_term_attr_zones, get_analysis_zones
+from nemo_retriever.relational_db.population.graph.dal.metrics_dal import (
+    get_metrics_related_zones_cypher,
+)
+from nemo_retriever.relational_db.population.graph.dal.attribute_dal import (
+    get_term_attr_zones,
+    get_analysis_zones,
+)
 
 # Init the wordnet module during startup
 _ = wordnet.synsets("temp")

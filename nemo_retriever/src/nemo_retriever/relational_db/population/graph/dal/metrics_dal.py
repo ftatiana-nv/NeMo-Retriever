@@ -3,15 +3,15 @@ import pandas as pd
 from datetime import datetime
 import json
 
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 from infra.PostgresConnection import get_postgres_conn
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     Labels,
     label_to_type,
     SQLFunctions,
     DatasourcesRelationships as Rels,
 )
-from shared.graph.model.snippet import Snippet
+from nemo_retriever.relational_db.population.graph.model.snippet import Snippet
 
 from itertools import product
 import re

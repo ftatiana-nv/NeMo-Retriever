@@ -1,15 +1,21 @@
-from shared.graph.dal.datasources_dal import get_parent_id_of_column_or_field
-from shared.graph.model.reserved_words import Labels
-from shared.graph.lineage.service import get_lineage
-from shared.graph.search import (
+from nemo_retriever.relational_db.population.graph.dal.datasources_dal import (
+    get_parent_id_of_column_or_field,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.lineage.service import get_lineage
+from nemo_retriever.relational_db.population.graph.search import (
     SearchObjectOptions,
     get_discovery_base,
     get_query_params,
 )
-from shared.graph.dal.usage_dal import get_usage_percentile_vars
-from shared.graph.model.reserved_words import data_tree_labels
+from nemo_retriever.relational_db.population.graph.dal.usage_dal import (
+    get_usage_percentile_vars,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    data_tree_labels,
+)
 from itertools import groupby
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 conn = get_neo4j_conn()
 

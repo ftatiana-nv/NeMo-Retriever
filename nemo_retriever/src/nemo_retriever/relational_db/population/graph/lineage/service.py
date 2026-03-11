@@ -1,8 +1,10 @@
 from functools import reduce
 import traceback
 from concurrent.futures import ThreadPoolExecutor
-from shared.graph.model.reserved_words import Labels
-from shared.graph.dal.utils_dal import get_node_properties_by_id
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import (
+    get_node_properties_by_id,
+)
 from .lineage_dal import (
     get_lineage_base,
     get_lineage_data,

@@ -2,6 +2,13 @@ import sys
 import pendulum
 import pandas as pd
 from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
+from nemo_retriever.relational_db.population.graph.utils import (
+    load_fks,
+    load_pks,
+    load_tables,
+    load_columns,
+    load_views,
+)
 
 
 def create_dataframe(settings):
@@ -33,6 +40,11 @@ def create_dataframe(settings):
 def data_for_populate_structured(settings):
     """Build the `data` dict expected by populate_structured_data from create_dataframe output."""
     tables, columns, views, queries, pks, fks = create_dataframe(settings)
+    tables = load_tables(tables, is_csv=False)
+    columns = load_columns(columns, is_csv=False)
+    views = load_views(views, is_csv=False)
+    pks = load_pks(pks, is_csv=False)
+    fks = load_fks(fks, is_csv=False)
     data = {
         "tables": tables,
         "columns": columns,
@@ -65,3 +77,4 @@ populate_structured_data(
     dialect="duckdb",
     keep_string_values=False,
 )
+print("done")

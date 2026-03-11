@@ -1,6 +1,6 @@
 import logging
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.graph.utils import chunks
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.utils import chunks
 import re
 
 conn = get_neo4j_conn()

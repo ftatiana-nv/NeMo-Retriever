@@ -1,10 +1,13 @@
 import logging
-from shared.graph.utils import chunks
-from shared.graph.dal.utils_dal import add_edges, prepare_edge
-from shared.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.utils import chunks
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import (
+    add_edges,
+    prepare_edge,
+)
+from nemo_retriever.relational_db.population.graph.model.node import Node
 
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.graph.model.query import get_sql_counters
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.model.query import get_sql_counters
 
 
 logger = logging.getLogger("queries_dal.py")

@@ -1,7 +1,7 @@
 from enum import Enum
 
 # TODO how to do the connection
-from nemo_retriever.relational_db.infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
 
 conn = get_neo4j_conn()

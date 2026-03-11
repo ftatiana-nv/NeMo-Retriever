@@ -1,7 +1,7 @@
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 import logging
 
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     fields_relationships,
     Labels,
     DatasourcesRelationships,

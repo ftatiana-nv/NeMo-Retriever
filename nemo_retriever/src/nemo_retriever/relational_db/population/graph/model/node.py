@@ -2,7 +2,7 @@ import re
 import logging
 import uuid
 from json import JSONEncoder
-from shared.graph.model.reserved_words import Props, Labels, label_to_type
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Props, Labels, label_to_type
 
 logger = logging.getLogger("node.py")
 

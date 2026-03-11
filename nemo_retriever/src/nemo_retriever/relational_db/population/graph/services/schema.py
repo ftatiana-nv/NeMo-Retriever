@@ -1,8 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from shared.graph.model.node import Node
-from shared.graph.utils import chunks
-from shared.graph.dal.schemas_dal import (
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.utils import chunks
+from nemo_retriever.relational_db.population.graph.dal.schemas_dal import (
     load_schema_from_graph,
     get_db_ids_and_names,
     get_schemas_ids_and_names,
@@ -11,8 +11,11 @@ from shared.graph.dal.schemas_dal import (
     merge_schema_edges,
     merge_schema_nodes,
 )
-from shared.graph.model.reserved_words import Labels
-from shared.graph.model.schema import TEMP_SCHEMA_NAME, Schema
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.schema import (
+    TEMP_SCHEMA_NAME,
+    Schema,
+)
 import pandas as pd
 import time
 import logging
