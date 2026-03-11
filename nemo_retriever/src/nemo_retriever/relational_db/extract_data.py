@@ -65,16 +65,27 @@ def parse_param(argv):
 
 
 
-# Example: build data for populate_structured_data and call it
+# Example: build data for populate_structured_data, run population, then description suggestions
+import logging
 from nemo_retriever.relational_db.population.populate_data import populate_structured_data
+from nemo_retriever.relational_db.description_suggestion.description_dal import (
+    populate_description_suggestions_for_tables,
+)
+
+logger = logging.getLogger(__name__)
+
+ACCOUNT_ID = "your_account_id"
 
 settings = {"connection_properties": {"database": "./spider2.duckdb"}}
 data = data_for_populate_structured(settings)
 populate_structured_data(
     data,
-    account_id="your_account_id",
+    account_id=ACCOUNT_ID,
     num_workers=4,
     dialect="duckdb",
     keep_string_values=False,
 )
-print("done")
+
+# # Generate and insert description suggestions for all tables (and later: other node types)
+# updated_table_ids = populate_description_suggestions_for_tables(ACCOUNT_ID)
+# logger.info("Description suggestions created for %d tables: %s", len(updated_table_ids), updated_table_ids)
