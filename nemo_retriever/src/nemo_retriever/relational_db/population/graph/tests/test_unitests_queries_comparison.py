@@ -1,12 +1,14 @@
 import os
 import pytest
 from shared.files.utils import load_tables, load_columns
-from shared.graph.parsers import schemas_parser
-from shared.graph.services.queries_comparison.compare_queries import (
+from nemo_retriever.relational_db.population.graph.parsers import schemas_parser
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.compare_queries import (
     compare_query_to_list_of_queries,
     get_slim_graph_from_edges,
 )
-from shared.graph.parsers.sql.queries_parser import parse_single
+from nemo_retriever.relational_db.population.graph.parsers.sql.queries_parser import (
+    parse_single,
+)
 
 ACCOUNT_ID = "test_account"
 

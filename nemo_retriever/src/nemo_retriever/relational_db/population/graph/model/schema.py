@@ -1,11 +1,11 @@
 import logging
 import uuid
-from shared.graph.model.node import Node, clean_phrase
-from shared.graph.model.query import MissingDataError
-from shared.graph.model.reserved_words import label_to_type
+from nemo_retriever.relational_db.population.graph.model.node import Node, clean_phrase
+from nemo_retriever.relational_db.population.graph.model.query import MissingDataError
+from nemo_retriever.relational_db.population.graph.model.reserved_words import label_to_type
 import pandas as pd
 import numpy as np
-from .reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
 
 pd.options.mode.chained_assignment = None
 

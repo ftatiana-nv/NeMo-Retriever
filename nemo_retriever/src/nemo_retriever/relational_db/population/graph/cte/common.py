@@ -1,4 +1,4 @@
-from shared.graph.cte.dal import (
+from nemo_retriever.relational_db.population.graph.cte.dal import (
     create_cte,
     get_fields_without_cte,
     delete_ctes,

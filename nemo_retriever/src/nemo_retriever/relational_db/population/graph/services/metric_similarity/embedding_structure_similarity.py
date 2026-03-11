@@ -7,7 +7,7 @@ import networkx as nx
 
 # from scipy import spatial
 
-from infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 # from sklearn.metrics.pairwise import cosine_similarity
 from networkx import isomorphism

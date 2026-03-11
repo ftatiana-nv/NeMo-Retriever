@@ -1,11 +1,11 @@
 import pandas as pd
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.files.utils import load_tables, load_columns
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.utils import load_tables, load_columns
 import logging
 
-from shared.graph.model.node import Node
-from shared.graph.model.reserved_words import Labels
-from shared.graph.model.schema import Schema
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.schema import Schema
 
 conn = get_neo4j_conn()
 logger = logging.getLogger("schemas_dal")

@@ -2,12 +2,15 @@ import logging
 import re
 
 import pandas as pd
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.graph.services.sql_snippet import (
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.services.sql_snippet import (
     save_custom_snippet,
     update_definition_sql,
 )
-from shared.graph.model.reserved_words import Labels, label_to_type
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    Labels,
+    label_to_type,
+)
 
 logger = logging.getLogger("attribute_dal.py")
 conn = get_neo4j_conn()

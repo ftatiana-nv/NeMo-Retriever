@@ -1,12 +1,14 @@
 import json
-from shared.graph.parsers.metrics_parser import parse_single_metric
-from shared.graph.model.reserved_words import Labels, SQLType
-from shared.graph.model.metric import Metric
-from shared.graph.model.metric_to_sql import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
+    Labels,
+    SQLType,
+)
+from nemo_retriever.relational_db.population.graph.model.metric import Metric
+from nemo_retriever.relational_db.population.graph.model.metric_to_sql import (
     build_sqls_from_metric,
     build_sql_from_bi_fields,
 )
-from shared.graph.dal.metrics_dal import (
+from nemo_retriever.relational_db.population.graph.dal.metrics_dal import (
     add_metric_to_graph,
     get_metrics_with_props,
     delete_metric_subgraph,
@@ -17,24 +19,20 @@ from shared.graph.dal.metrics_dal import (
     connect_metric_to_bi_fields,
     add_edges_to_queries,
 )
-from shared.graph.dal.tables_dal import get_tables_queried_today
-from shared.graph.services.queries_comparison.queries_comparison import (
+from nemo_retriever.relational_db.population.graph.dal.tables_dal import (
+    get_tables_queried_today,
+)
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.queries_comparison import (
     find_identical_queries,
 )
-from shared.graph.parsers.sql.queries_parser import parse_single
-
-# from shared.graph.parsers.metrics_parser import (
-#     find_common_dimensions_and_filters,
-# )
-from shared.graph.dal.kpi_recommendation_dal import get_kpi_recommendation
-
-# from shared.graph.services.metric_similarity.embedding_structure_similarity import (
-#     calculate_embedding_structure_similarity,
-# )
+from nemo_retriever.relational_db.population.graph.parsers.sql.queries_parser import (
+    parse_single,
+)
+from nemo_retriever.relational_db.population.graph.dal.kpi_recommendation_dal import (
+    get_kpi_recommendation,
+)
 import logging
 import uuid
-from notifications.log_dal import produce_signal
-from notifications.types import Events, Actions, NotificationClassification
 from pandas import DataFrame
 
 logger = logging.getLogger("metrics.py")
@@ -325,19 +323,6 @@ def recommend_kpis(account_id, schemas):
             logger.error(metric.formula_to_kpi)
             logger.error(e)
             continue
-        # we only send one event per population
-    if recommended_metric_log is not None:
-        produce_signal(
-            account_id,
-            Events.RECOMMENDATION,
-            Actions.SAVE,
-            None,
-            Labels.METRIC,
-            recommended_metric_log["id"],
-            None,
-            recommended_metric_log,
-            NotificationClassification.RECOMMENDATION.OPPORTUNITY,
-        )
 
 
 def add_metric_obj_to_graph(
@@ -346,11 +331,5 @@ def add_metric_obj_to_graph(
     creating_from_bi_fields: list[str] = None,
     population=False,
 ):
-    parse_single_metric(
-        account_id,
-        metric_obj,
-        from_bi_fields=creating_from_bi_fields,
-        population=population,
-    )
     logger.info(f"Adding {metric_obj.name} to graph.")
     add_metric_to_graph(account_id, metric_obj)

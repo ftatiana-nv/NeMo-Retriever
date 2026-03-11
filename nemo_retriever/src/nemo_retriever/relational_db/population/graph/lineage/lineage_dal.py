@@ -1,10 +1,10 @@
 import logging
 
-from infra.Neo4jConnection import get_neo4j_conn
-from shared.graph.dal.utils_dal import (
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
+from nemo_retriever.relational_db.population.graph.dal.utils_dal import (
     get_tags_query_by_node_alias,
 )
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     Labels,
     DatasourcesRelationships,
     type_to_label,

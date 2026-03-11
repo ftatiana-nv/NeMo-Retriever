@@ -1,6 +1,8 @@
-from shared.graph.parsers.sql import sql_select_parser as sql_select
-from shared.graph.model.reserved_words import Props
-from shared.graph.model.query import Query
+from nemo_retriever.relational_db.population.graph.parsers.sql import (
+    sql_select_parser as sql_select,
+)
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Props
+from nemo_retriever.relational_db.population.graph.model.query import Query
 
 
 def build_query_obj(

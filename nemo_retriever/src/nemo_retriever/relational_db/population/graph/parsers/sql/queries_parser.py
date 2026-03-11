@@ -5,16 +5,16 @@ import codecs
 from sqloxide import parse_sql
 
 
-from shared.graph.model.node import Node
-from shared.graph.model.query import (
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.model.query import (
     Query,
     NotSelectSqlTypeError,
     NotValidSyntaxError,
     UnsupportedQueryError,
 )
-from shared.graph.model.reserved_words import SQLType
+from nemo_retriever.relational_db.population.graph.model.reserved_words import SQLType
 
-from shared.graph.parsers.sql import (
+from nemo_retriever.relational_db.population.graph.parsers.sql import (
     sql_insert_into_parser,
     sql_update_table_parser,
     sql_merge_table_parser,

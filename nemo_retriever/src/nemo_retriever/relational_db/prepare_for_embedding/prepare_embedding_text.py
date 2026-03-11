@@ -4,7 +4,7 @@ from typing import Any, List, Optional
 import pandas as pd
 
 from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
-from nemo_retriever.relational_db.infra.Neo4jConnection import get_neo4j_conn
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 from nemo_retriever.relational_db.infra.PostgresConnection import get_postgres_conn
 from nemo_retriever.relational_db.ai_services.config import (
     get_embeddings_client,
@@ -18,8 +18,22 @@ from langchain_core.documents import Document
 # Keep backward compatibility
 # azure_embeddings = get_azure_embeddings_client()
 
-conn = get_neo4j_conn()
-# pg_conn = get_postgres_conn()
+# Lazy so importing this module does not block on Neo4j connection (avoids "stuck" import).
+_conn = None
+
+def _get_conn():
+    global _conn
+    if _conn is None:
+        _conn = get_neo4j_conn()
+    return _conn
+
+
+# Backward compatibility: code that used `conn` still works (e.g. query_neo4j_tables_for_embedding).
+# We assign on first use so the module can load without connecting to Neo4j.
+def __getattr__(name: str):
+    if name == "conn":
+        return _get_conn()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 # def get_embeddings(account_id: str, is_embeddings: bool = False, provider: str = None):

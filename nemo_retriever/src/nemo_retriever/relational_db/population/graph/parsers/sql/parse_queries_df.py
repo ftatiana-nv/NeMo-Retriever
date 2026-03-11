@@ -3,26 +3,26 @@ import logging
 import time
 import uuid
 import pandas as pd
-from shared.graph.utils import chunks
-from shared.graph.dal.tables_dal import load_sqls_to_tables
-from shared.graph.model.reserved_words import SQLType
+from nemo_retriever.relational_db.population.graph.utils import chunks
+from nemo_retriever.relational_db.population.graph.dal.tables_dal import load_sqls_to_tables
+from nemo_retriever.relational_db.population.graph.model.reserved_words import SQLType
 from sqloxide import parse_sql
 from tqdm import tqdm
 
 from .queries_parser import parse_single, dispatch_sqls, pre_process
-from shared.graph.services.queries_comparison.queries_comparison import (
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.queries_comparison import (
     find_identical_queries,
 )
-from shared.graph.dal.schemas_dal import add_schemas_edge
-from shared.graph.dal.queries_dal import (
+from nemo_retriever.relational_db.population.graph.dal.schemas_dal import add_schemas_edge
+from nemo_retriever.relational_db.population.graph.dal.queries_dal import (
     add_query,
     get_sql_by_full_query,
     update_counters_and_timestamps_for_query_and_affected_data,
 )
-from shared.graph.parsers.sql.views_parser import parse as parse_views
+from nemo_retriever.relational_db.population.graph.parsers.sql.views_parser import parse as parse_views
 
 
-from shared.graph.model.query import Query, MissingDataError, UnsupportedQueryError
+from nemo_retriever.relational_db.population.graph.model.query import Query, MissingDataError, UnsupportedQueryError
 
 logger = logging.getLogger("queries_parser.py")
 keep_string_values = False

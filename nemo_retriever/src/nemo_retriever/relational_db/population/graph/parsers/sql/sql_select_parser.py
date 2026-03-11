@@ -6,7 +6,7 @@ import networkx as nx
 from typing import Callable, Optional, Union, Any
 from functools import reduce
 
-from shared.graph.model.query import (
+from nemo_retriever.relational_db.population.graph.model.query import (
     Query,
     MissingDataError,
     NoFKError,
@@ -14,7 +14,7 @@ from shared.graph.model.query import (
     is_join,
     get_should_update,
 )
-from shared.graph.model.reserved_words import (
+from nemo_retriever.relational_db.population.graph.model.reserved_words import (
     Props,
     Labels,
     SQL,
@@ -24,11 +24,11 @@ from shared.graph.model.reserved_words import (
     JoinNodes,
     SQLFunctionsWithConsantArg,
 )
-from shared.graph.model.node import Node
-from shared.graph.parsers.sql.op_name_to_symbol import get_symbol
-from shared.graph.parsers.sql.utils import get_key_recursive
+from nemo_retriever.relational_db.population.graph.model.node import Node
+from nemo_retriever.relational_db.population.graph.parsers.sql.op_name_to_symbol import get_symbol
+from nemo_retriever.relational_db.population.graph.parsers.sql.utils import get_key_recursive
 import pendulum
-from shared.graph.services.queries_comparison.compare_queries import (
+from nemo_retriever.relational_db.population.graph.services.queries_comparison.compare_queries import (
     remove_aliases_from_graph,
 )
 
