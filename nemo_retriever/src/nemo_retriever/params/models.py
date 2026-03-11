@@ -151,17 +151,24 @@ class GpuAllocationParams(_ParamsModel):
 
 
 class ExtractParams(_ParamsModel):
+    # Extraction flags
+    extract_text: bool = True
+    extract_images: bool = True
+    extract_tables: bool = True
+    extract_charts: bool = True
+    extract_infographics: bool = True
+    extract_page_as_image: Optional[bool] = None
+
+    # Extraction options
     method: Optional[str] = None
-    extract_text: bool = False
-    extract_images: bool = False
-    extract_tables: bool = False
     use_table_structure: bool = False
     table_output_format: Optional[Literal["pseudo_markdown", "markdown"]] = None
-    extract_charts: bool = False
-    extract_infographics: bool = False
-    extract_page_as_image: Optional[bool] = None
+    use_graphic_elements: bool = False
     dpi: int = 200
+    inference_batch_size: int = 8
+    ocr_model_dir: Optional[str] = None
 
+    # Service endpoints
     invoke_url: Optional[str] = None
     api_key: Optional[str] = None
     request_timeout_s: float = 120.0
@@ -171,26 +178,30 @@ class ExtractParams(_ParamsModel):
     ocr_invoke_url: Optional[str] = None
     ocr_api_key: Optional[str] = None
     ocr_request_timeout_s: Optional[float] = None
+    graphic_elements_invoke_url: Optional[str] = None
     table_structure_invoke_url: Optional[str] = None
 
-    inference_batch_size: int = 8
+    # Output columns
     output_column: str = "page_elements_v3"
     num_detections_column: str = "page_elements_v3_num_detections"
     counts_by_label_column: str = "page_elements_v3_counts_by_label"
-    ocr_model_dir: Optional[str] = None
 
     remote_retry: RemoteRetryParams = Field(default_factory=RemoteRetryParams)
     batch_tuning: BatchTuningParams = Field(default_factory=BatchTuningParams)
 
     @model_validator(mode="after")
-    def _auto_enable_table_structure(self) -> "ExtractParams":
-        """Auto-configure table-structure flags.
+    def _auto_enable_features(self) -> "ExtractParams":
+        """Auto-configure feature flags from remote endpoints.
 
+        * Enable ``use_graphic_elements`` when ``graphic_elements_invoke_url``
+          is provided.
         * Enable ``use_table_structure`` when ``table_structure_invoke_url``
           is provided.
         * Default ``table_output_format`` to ``"markdown"`` when the stage is
           enabled and the caller did not explicitly choose a format.
         """
+        if self.graphic_elements_invoke_url and not self.use_graphic_elements:
+            self.use_graphic_elements = True
         if self.table_structure_invoke_url and not self.use_table_structure:
             self.use_table_structure = True
         if self.table_output_format is None:
@@ -289,111 +300,3 @@ class InfographicParams(_ParamsModel):
     output_column: str = "infographic_elements_v1"
     num_detections_column: str = "infographic_elements_v1_num_detections"
     counts_by_label_column: str = "infographic_elements_v1_counts_by_label"
-
-
-# ---------------------------------------------------------------------------
-# Structured (database) ingestion params
-# ---------------------------------------------------------------------------
-
-
-class StructuredExtractParams(_ParamsModel):
-    """Params for step 1: extract schema metadata and write to Neo4j.
-
-    Covers SQLAlchemy reflection of a live database and/or parsing of
-    pre-existing SQL DDL/query files.  Produces Database, Schema, Table,
-    Column, View and Query nodes together with their relationships.
-    The Neo4j connection is managed by the shared Neo4jConnectionManager
-    (see vector_store/neo4j_store.py) and is not configured here.
-    """
-
-    db_connection_string: Optional[str] = None
-
-
-class StructuredSemanticLayerParams(_ParamsModel):
-    """Params for step 2: map business terms/attributes to graph entities.
-
-    Global term and attribute definitions are matched to Table and Column
-    nodes; unmatched entities receive auto-generated Term/Attribute nodes
-    together with MAPS_TO_TABLE / MAPS_TO_COLUMN relationships.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    # Path to a YAML/JSON file containing the global semantic-layer definition
-    semantic_layer_file: Optional[str] = None
-    # Raw term → table mappings (overrides or supplements the file)
-    term_mappings: dict[str, str] = Field(default_factory=dict)
-    # Raw attribute → column mappings (overrides or supplements the file)
-    attribute_mappings: dict[str, str] = Field(default_factory=dict)
-    auto_create_unmapped: bool = True
-
-
-class StructuredPIIParams(_ParamsModel):
-    """Params for step 3: detect PII in Column nodes and tag them.
-
-    Regex patterns are applied first; an optional LLM call can be made for
-    columns whose names/descriptions are ambiguous.  Matching columns receive
-    a ``pii_type`` property and a HAS_PII_TYPE relationship.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    # Additional regex patterns keyed by PII type label
-    extra_patterns: dict[str, str] = Field(default_factory=dict)
-    # When True, ambiguous columns are also evaluated via an LLM
-    use_llm: bool = False
-    llm_invoke_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
-    llm_model: Optional[str] = None
-
-
-class StructuredUsageWeightsParams(_ParamsModel):
-    """Params for step 4: derive usage weights from query log files.
-
-    Query log files are parsed and Table/Column co-occurrence frequencies are
-    computed, then written back as ``usage_weight`` float properties on the
-    corresponding Neo4j nodes.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    # One or more paths (or glob patterns) pointing to SQL query log files
-    query_log_files: list[str] = Field(default_factory=list)
-    # Log format hint for the parser (e.g. "postgres", "snowflake", "raw_sql")
-    log_format: str = "raw_sql"
-    normalize_weights: bool = True
-
-
-class StructuredDescriptionParams(_ParamsModel):
-    """Params for step 5: LLM-generate natural-language descriptions for all nodes.
-
-    Descriptions are generated for Database, Schema, Table, Column, View and
-    Query nodes and written back to Neo4j as a ``description`` property.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    llm_invoke_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
-    llm_model: Optional[str] = None
-    # Node labels to generate descriptions for; empty list means all supported types
-    target_node_labels: list[str] = Field(default_factory=list)
-    # Maximum concurrent LLM requests
-    max_concurrency: int = 8
-    # Retry settings for LLM calls
-    max_retries: int = 3
-
-
-class StructuredFetchParams(_ParamsModel):
-    """Params for step 6: fetch entity descriptions from Neo4j into a DataFrame.
-
-    Reads all node descriptions from Neo4j and assembles a pandas DataFrame
-    with columns: ``text`` (the description), ``_embed_modality`` = ``"text"``,
-    and ``metadata`` (JSON blob with entity_type, entity_name, node_id).
-    No embedding is performed here — the DataFrame is passed to the embed step.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    # Node labels to fetch; empty list means all supported types
-    target_node_labels: list[str] = Field(default_factory=list)
-    # Column names in the output DataFrame
-    text_column: str = "text"
-    metadata_column: str = "metadata"
-    embed_modality_column: str = "_embed_modality"
-    embed_modality_value: str = "text"

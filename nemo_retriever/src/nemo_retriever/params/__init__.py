@@ -22,12 +22,6 @@ from .models import PdfSplitParams
 from .models import RemoteInvokeParams
 from .models import RemoteRetryParams
 from .models import RunMode
-from .models import StructuredDescriptionParams
-from .models import StructuredExtractParams
-from .models import StructuredFetchParams
-from .models import StructuredPIIParams
-from .models import StructuredSemanticLayerParams
-from .models import StructuredUsageWeightsParams
 from .models import TableParams
 from .models import TextChunkParams
 from .models import VdbUploadParams
@@ -53,12 +47,6 @@ __all__ = [
     "RemoteInvokeParams",
     "RemoteRetryParams",
     "RunMode",
-    "StructuredDescriptionParams",
-    "StructuredExtractParams",
-    "StructuredFetchParams",
-    "StructuredPIIParams",
-    "StructuredSemanticLayerParams",
-    "StructuredUsageWeightsParams",
     "TableParams",
     "TextChunkParams",
     "VdbUploadParams",

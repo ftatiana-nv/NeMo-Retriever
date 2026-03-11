@@ -1,8 +1,18 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-25, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""
+Neo4j connection and session management for the relational_db stack.
+"""
+
 import os
-from neo4j import GraphDatabase, exceptions, WRITE_ACCESS, READ_ACCESS
 import logging
 
+from neo4j import GraphDatabase, exceptions, WRITE_ACCESS, READ_ACCESS
+
 logger = logging.getLogger(__name__)
+
 
 class Neo4jConnection:
     def __init__(self, uri, username, password):
