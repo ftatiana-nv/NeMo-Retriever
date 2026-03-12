@@ -7,10 +7,12 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Optional
 
+from nemo_retriever.params import EmbedParams
 from nemo_retriever.params import IngestExecuteParams
 from nemo_retriever.params import IngestorCreateParams
 from nemo_retriever.params import RunMode
 from nemo_retriever.params import StructuredExtractParams
+from nemo_retriever.params import VdbUploadParams
 
 from .factory import create_runmode_ingestor
 
@@ -24,9 +26,18 @@ def run_mode_ingest(
     create_params: IngestorCreateParams | None = None,
     ingest_params: IngestExecuteParams | None = None,
     structured_params: StructuredExtractParams | None = None,
+    embed_params: EmbedParams | None = None,
+    vdb_params: VdbUploadParams | None = None,
 ) -> tuple[object, Optional[Future]]:
     ingestor = create_runmode_ingestor(run_mode=run_mode, params=create_params)
-    
+
+    # Register embed + vdb_upload tasks on the ingestor via the builder chain,
+    # matching the same pattern used in the unstructured pipeline examples.
+    if embed_params is not None:
+        ingestor = ingestor.embed(embed_params)
+    if vdb_params is not None:
+        ingestor = ingestor.vdb_upload(vdb_params)
+
     structured_future: Optional[Future] = None
     if structured_params is not None:
         # Submit to the module-level executor so the thread survives past this
