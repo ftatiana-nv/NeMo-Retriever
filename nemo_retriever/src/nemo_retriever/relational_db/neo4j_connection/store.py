@@ -65,7 +65,12 @@ class Neo4jConnection:
                     default_access_mode=default_access_mode,
                 )
                 result = session.run(query, parameters)
-                response = result.data() if ret_type == "data" else result.graph()
+                # Consume and copy data before closing session to avoid BufferError
+                # ("Existing exports of data: object cannot be re-sized")
+                if ret_type == "data":
+                    response = [dict(record) for record in result]
+                else:
+                    response = result.graph()
             except exceptions.TransientError as te:
                 if i < tries - 1:
                     continue
@@ -96,27 +101,23 @@ class Neo4jConnectionManager:
         logger.info("Verify Connectivity for default Neo4j")
         self.conn.verify_connectivity()
 
-    def _get_connection_for_account(self, parameters):
-        if parameters is None:
-            raise ValueError("Parameters (with account_id) must be sent to Neo4j")
-        if "account_id" not in parameters:
-            raise ValueError("account_id is missing")
-
+    def get_connection(self):
+        """Return the Neo4j connection."""
         return self.conn
 
     def verify_connectivity(self):
         return self.conn.verify_connectivity()
 
     def query_write(self, query, parameters):
-        conn = self._get_connection_for_account(parameters)
+        conn = self.get_connection()
         return conn.query(query, parameters)
 
     def query_read_only(self, query, parameters):
-        conn = self._get_connection_for_account(parameters)
+        conn = self.get_connection()
         return conn.query(query, parameters, READ_ACCESS)
 
     def query_graph(self, query, parameters):
-        conn = self._get_connection_for_account(parameters)
+        conn = self.get_connection()
         return conn.query(query, parameters, ret_type="graph")
 
 
