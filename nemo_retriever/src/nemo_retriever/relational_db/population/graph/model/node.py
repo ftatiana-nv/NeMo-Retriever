@@ -1,40 +1,9 @@
-import re
 import logging
 import uuid
 from json import JSONEncoder
-from nemo_retriever.relational_db.population.graph.model.reserved_words import Props, Labels, label_to_type
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, label_to_type
 
 logger = logging.getLogger("node.py")
-
-
-def split_capitals(data: str) -> str:
-    cap_list = data.lower()
-    try:
-        data = data.replace("ID", "Id")
-        data = data.replace("SN", "Sn")  # Serial number
-        data = data.replace("VIP", "Vip")
-        data = data.replace("NickName", "Nickname")
-        find = re.findall("[\w][^A-Z\s]*", data)  # chars like @%&^ are removed
-        if find:
-            cap_list = " ".join(find).lower()
-        return cap_list
-
-    except Exception as e:
-        logger.error(f"problem in split_capitals: {e}")
-        return cap_list
-
-
-def capitals_to_lower(data: str) -> str:
-    words = " ".join(w.lower() if w.isupper() else w for w in data.split())
-    return words
-
-
-def clean_phrase(phrase):
-    phrase = phrase.replace("_", " ")
-    phrase = phrase.replace(":", " ")
-    phrase = capitals_to_lower(phrase)
-    phrase = split_capitals(phrase)
-    return phrase
 
 
 class Node:
@@ -55,11 +24,6 @@ class Node:
         else:
             self.id = str(existing_id)
 
-        if name:
-            if "clean_name" not in self.props.keys():
-                self.clean_name = clean_phrase(name)
-                self.props.update({"clean_name": self.clean_name})
-
         self.props.update({"id": str(self.id)})
         if "type" not in self.props:
             self.props.update({"type": label_to_type(label)})
@@ -77,9 +41,6 @@ class Node:
 
     def get_name(self):
         return self.name
-
-    def get_clean_name(self):
-        return self.clean_name
 
     def get_label(self):
         return self.label
@@ -178,8 +139,6 @@ class NodeEncoder(JSONEncoder):
         if "id" in props_copy.keys():
             props_copy.pop("id")
 
-        if Props.SQL_ID in props_copy.keys():
-            props_copy.pop(Props.SQL_ID)
         if o.label == Labels.SQL:
             props_copy.pop("name")
             dict_for_json = {"label": o.label, "properties": props_copy}

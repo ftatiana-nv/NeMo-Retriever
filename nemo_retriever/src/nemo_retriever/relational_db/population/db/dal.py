@@ -8,22 +8,22 @@ logger = logging.getLogger(__name__)
 
 from nemo_retriever.relational_db.population.graph.dal.utils_dal import get_entity_before_update
 from nemo_retriever.relational_db.population.graph.utils import chunks
-from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, SQLType, label_to_type
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, label_to_type
 from nemo_retriever.relational_db.population.graph.dal.schemas_dal import load_schema_from_graph, add_schemas_edge
 
 from nemo_retriever.relational_db.population.graph.model.schema import TEMP_SCHEMA_NAME
 conn = get_neo4j_conn()
 
 
-def db_exists(account_id, db_node):
+def db_exists(db_node):
     db_name = db_node.get_name()
-    query = f"""
-    MATCH (n:db{{account_id:"{account_id}", name:"{db_name}"}})
+    query = """
+    MATCH (n:db{name: $db_name})
     OPTIONAL MATCH (n)-[r]-(v) WHERE NOT v:connection
     RETURN n.id AS id, count(r) AS nbrs
     """
     result_data = conn.query_read_only(
-        query=query, parameters={"account_id": account_id}
+        query=query, parameters={"db_name": db_name}
     )
     if not result_data or len(result_data) == 0:
         return None, None
@@ -33,23 +33,22 @@ def db_exists(account_id, db_node):
     return result_data[0]["id"], False if nbrs == 0 else True
 
 
-def update_node_property(account_id, label, node_id, update_properties):
+def update_node_property(label, node_id, update_properties):
     query = f"""
-            match(n:{label}{{account_id:$account_id, id:$node_id}})
-            set n += $update_properties    
+            match(n:{label}{{id:$node_id}})
+            set n += $update_properties
             """
     conn.query_write(
         query=query,
         parameters={
-            "account_id": account_id,
             "node_id": node_id,
             "update_properties": update_properties,
         },
     )
 
 
-def delete_schema(schema_node_id, account_id, deleted_time=datetime.now()):
-    query = """MATCH (n:schema {id: $schema_node_id, account_id: $account_id})-[:schema]->(t:table)-[:schema]->(c:column) 
+def delete_schema(schema_node_id, deleted_time=datetime.now()):
+    query = """MATCH (n:schema {id: $schema_node_id})-[:schema]->(t:table)-[:schema]->(c:column)
                SET n.deleted = True
                SET n.deleted_time = $deleted_time
                SET t.deleted = True
@@ -60,164 +59,17 @@ def delete_schema(schema_node_id, account_id, deleted_time=datetime.now()):
     conn.query_write(
         query=query,
         parameters={
-            "account_id": account_id,
             "schema_node_id": schema_node_id,
             "deleted_time": deleted_time,
         },
     )
 
 
-def update_disconnected_sqls(account_id):
-    query = """
-            match (sql:sql{account_id:$account_id, is_sub_select:false})
-            call (sql){
-            CALL apoc.path.subgraphNodes(sql, {
-                relationshipFilter: "SQL>",
-                labelFilter: "/table|-column",     
-                minLevel: 0})
-            YIELD node
-            WHERE coalesce(node.deleted,false)=true
-            return collect(node.id) as tbls
-            }
-            with sql, tbls
-            SET sql.invalid = size(tbls) > 0
-            SET sql.invalid_items = tbls
-            SET sql.invalid_time = case when sql.invalid=true and sql.invalid_time is null 
-                    then datetime.realtime() else sql.invalid_time end
-            """
-    conn.query_write(query=query, parameters={"account_id": account_id})
-    # delete_sql = [x["sql_id"] for x in result_data]
-
-    query = """
-            match (sql:sql{account_id:$account_id, is_sub_select:false})
-            call (sql){
-            CALL apoc.path.subgraphNodes(sql, {
-                relationshipFilter: "SQL>",
-                labelFilter: "/column|-table",     
-                minLevel: 0})
-            YIELD node
-            WHERE coalesce(node.deleted,false)=true
-            return collect(node.id) as cols
-            }
-            with sql, cols
-            SET sql.invalid = size(cols) > 0
-            SET sql.invalid_items = coalesce(sql.invalid_items, []) + cols
-            SET sql.invalid_time = case when sql.invalid=true and sql.invalid_time is null 
-                    then datetime.realtime() else sql.invalid_time end
-            """
-    conn.query_write(query=query, parameters={"account_id": account_id})
-
-def delete_unused_temporary_tables_and_columns(account_id):
-    query = """
-            match(s:temp_schema{account_id:$account_id})-[:schema]->(deleted_table:temp_table{deleted:true})-[:schema]->(c:temp_column)
-            detach delete c
-            detach delete deleted_table
-            with s
-            match(s:temp_schema{account_id:$account_id})-[:schema]->(t:temp_table)-[:schema]->(deleted_column{deleted:true})
-            detach delete deleted_column
-            """
-    try:
-        conn.query_write(
-            query=query,
-            parameters={"account_id": account_id},
-        )
-    except Exception as err:
-        logger.error(f"Error in delete_unused_temporary_tables_and_columns: {err}")
 
 
-def find_and_delete_old_version_source_queries(account_id, source_type):
-    query = """ 
-                match(c:column|temp_column{account_id:$account_id})<-[r:source_of]-() 
-                where exists((:sql{id:r.source_sql_id[0], sql_type:$source_type})-[]-()) 
-                with c, apoc.coll.toSet(apoc.coll.flatten(collect(r.source_sql_id))) as sources
-                where size(sources)>1
-                match(s:sql{account_id:$account_id, sql_type:$source_type}) where s.id in sources
-                with c, apoc.coll.sortNodes(collect(s), 'last_query_timestamp')[0] as first_s, sources
-                match(s:sql{account_id:$account_id, sql_type:$source_type}) where s.id in sources and s.id<>first_s.id
-                with distinct s, s.id as deleted_sql_id
-                CALL apoc.path.subgraphNodes(s, { 
-                    relationshipFilter:'SQL>', 
-                    minLevel: 0}
-                ) YIELD node 
-                where not(node:table or node:column or node:temp_table or node:temp_column)
-                detach delete node
-                RETURN collect(distinct deleted_sql_id) as deleted_sql_ids
-                """
-    try:
-        result = conn.query_write(
-            query=query,
-            parameters={"account_id": account_id, "source_type": source_type},
-        )
-        if len(result) > 0:
-            deleted_sql_ids = result[0]["deleted_sql_ids"]
-    except Exception as err:
-        raise Exception('Error in "find_and_delete_redundant_views"')
-
-    query = """ 
-                CALL apoc.periodic.iterate(
-                    "UNWIND $deleted_sql_ids as deleted_sql_id
-                    MATCH (c2:column|temp_column{account_id:$account_id})<-[r_to_delete:source_of]-(src_col:column|temp_column{account_id:$account_id})
-                    WHERE deleted_sql_id in r_to_delete.source_sql_id
-                    RETURN deleted_sql_id, r_to_delete",
-                    "CALL apoc.do.when(size(r_to_delete.source_sql_id) > 1,
-                        'SET r_to_delete.source_sql_id = [id in r_to_delete.source_sql_id where id <> deleted_sql_id]',
-                        'DELETE r_to_delete',
-                        {r_to_delete:r_to_delete, deleted_sql_id:deleted_sql_id}
-                    )
-                    YIELD value
-                    RETURN count(*)",
-                {batchSize:100, parallel:false, params:{deleted_sql_ids:$deleted_sql_ids, account_id:$account_id}})
-                yield batches, total return batches, total
-            """
-    try:
-        conn.query_write(
-            query=query,
-            parameters={"account_id": account_id, "deleted_sql_ids": deleted_sql_ids},
-        )
-    except Exception as err:
-        raise Exception('Error in "find_and_delete_redundant_views"')
 
 
-def find_and_connect_unions(account_id):
-    query = """
-            MATCH(main_union_node:operator{name: "Union", account_id:$account_id})
-            WHERE not coalesce(main_union_node.processed, false)
-            WITH main_union_node
-            MATCH(s:sql{id:main_union_node.sql_id})
-            WHERE s.sql_type in $sql_types
-            CALL (s){
-                // collect all joins nodes in the union's subgraph for them to be "blacklist"
-                CALL apoc.path.subgraphNodes(s, {
-                    relationshipFilter: "SQL>",
-                    labelFilter: ">command",     
-                    minLevel: 0})
-                YIELD node as joins_node
-                WHERE joins_node.name = "Joins"
-                MATCH(from_node:command)-[:SQL]->(joins_node)
-                RETURN collect(from_node) as blacklist
-            }
-            CALL apoc.path.subgraphNodes(main_union_node, {
-                relationshipFilter: "SQL>",
-                labelFilter: "/table",     
-                minLevel: 0,
-                blacklistNodes: blacklist})
-            YIELD node as table_for_union
-            WITH main_union_node, collect(table_for_union) as tables_for_union
-            UNWIND range(0, size(tables_for_union)-2) as i
-            UNWIND range(i+1, size(tables_for_union)-1) as j
-            MATCH(t1:table{id:tables_for_union[i].id, account_id:$account_id}), (t2:table{id:tables_for_union[j].id, account_id:$account_id})
-            MERGE(t1)-[:union]->(t2)
-            """
-    conn.query_write(
-        query=query,
-        parameters={
-            "account_id": account_id,
-            "sql_types": [SQLType.QUERY, SQLType.MERGE],
-        },
-    )
-
-
-def add_schemas_edge_batch(account_id, edges, created):
+def add_schemas_edge_batch(edges, created):
     """
     If the nodes do not exist in the Neo4j graph, the function adds them.
     Add to the Neo4j graph the given edge.
@@ -244,7 +96,6 @@ def add_schemas_edge_batch(account_id, edges, created):
         conn.query_write(
             query=query,
             parameters={
-                "account_id": account_id,
                 "created": created,
                 "edges": edges,
             },
@@ -253,12 +104,12 @@ def add_schemas_edge_batch(account_id, edges, created):
         raise Exception('Error in "add_schemas_edge_batch"')
 
 
-def accumulate_deleted_column_props(account_id, deleted_column, list_for_event_log):
+def accumulate_deleted_column_props(deleted_column, list_for_event_log):
     list_for_event_log.append(
         {
             "id": deleted_column.props_graph["id"],
             "before_update": get_entity_before_update(
-                account_id, deleted_column.props_graph["id"], Labels.COLUMN
+                deleted_column.props_graph["id"], Labels.COLUMN
             ),
             "payload": None,
         }
@@ -266,7 +117,7 @@ def accumulate_deleted_column_props(account_id, deleted_column, list_for_event_l
 
 
 def accumulate_added_column_props(
-    account_id, added_column, list_for_event_log, edges_to_add, new_schema
+    added_column, list_for_event_log, edges_to_add, new_schema
 ):
     new_table_node_props = new_schema.get_table_node_props(added_column.table_name)
     new_table_node_match_props = new_schema.get_table_node_match_props(
@@ -294,7 +145,7 @@ def accumulate_added_column_props(
 
 
 def accumulate_updated_table(
-    account_id, table_in_intersection, items_to_update_in_graph, new_schema
+    table_in_intersection, items_to_update_in_graph, new_schema
 ):
     # verify that the node with the correct id is in hand: replace new table id with existing table id
     # new_schema.replace_id(table_in_intersection.props_y["id"], table_in_intersection.props_x["id"])
@@ -310,7 +161,7 @@ def accumulate_updated_table(
 
 
 def accumulate_updated_column(
-    account_id, column_in_intersection, items_to_update_in_graph, new_schema
+    column_in_intersection, items_to_update_in_graph, new_schema
 ):
     # verify that the node with the correct id is in hand
     # new_schema.replace_id(column_in_intersection.props_y["id"], column_in_intersection.props_x["id"])
@@ -325,7 +176,7 @@ def accumulate_updated_column(
     )
 
 
-def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
+def update_diff_from_existing_schema(new_schema, latest_timestamp):
     try:
         added_or_modified_tables = {
             "schema": str(new_schema.schema_node.name),
@@ -341,7 +192,7 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             return added_or_modified_tables
 
         existing_schema = load_schema_from_graph(
-            db_name, schema_name, account_id, is_temp=is_temp
+            db_name, schema_name, is_temp=is_temp
         )
         if existing_schema is None:
             return False
@@ -362,7 +213,6 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
                     new_schema.get_table_node(table_name),
                     edge_params,
                 ],
-                account_id,
                 latest_timestamp,
             )
 
@@ -374,7 +224,6 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
                         new_schema.get_column_node(column_name, table_name),
                         edge_params,
                     ],
-                    account_id,
                     latest_timestamp,
                 )
 
@@ -384,7 +233,7 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             deleted_table_node_props = existing_schema.get_table_node_props(
                 deleted_table_name
             )
-            delete_table(deleted_table_node_props["id"], account_id)
+            delete_table(deleted_table_node_props["id"])
         # update ids of tables and columns that appear both in the new schema and in the existing schema
         tables_merge = pd.merge(
             existing_schema.tables_df,
@@ -425,7 +274,7 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             items_to_update_in_graph = []
             tables_to_update.apply(
                 lambda x: accumulate_updated_table(
-                    account_id, x, items_to_update_in_graph, new_schema
+                    x, items_to_update_in_graph, new_schema
                 ),
                 axis=1,
             )
@@ -435,7 +284,7 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             len_chunks = len(items_to_update_in_graph_chunks)
             for i, chunk in enumerate(items_to_update_in_graph_chunks):
                 logger.info(f"Updating tables chunk {i + 1}/{len_chunks}")
-                update_properties_in_graph_batch(account_id, chunk)
+                update_properties_in_graph_batch(chunk)
 
         # If a table appears in both schemas, identify columns to add and columns to delete.
         columns_merge = pd.merge(
@@ -451,9 +300,9 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
         logger.info(f"Columns to delete in schema {schema_name}: {len(deleted_columns)}")
         entities = []
         deleted_columns.apply(
-            lambda x: accumulate_deleted_column_props(account_id, x, entities), axis=1
+            lambda x: accumulate_deleted_column_props(x, entities), axis=1
         )
-        delete_columns_batch([x["id"] for x in entities], account_id)
+        delete_columns_batch([x["id"] for x in entities])
         # filter out columns of deleted tables
         modified_tables = deleted_columns.table_name.unique()
         added_or_modified_tables["tables"].update(modified_tables)
@@ -473,11 +322,11 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
         edges_to_merge = []
         added_columns.apply(
             lambda x: accumulate_added_column_props(
-                account_id, x, entities, edges_to_merge, new_schema
+                x, entities, edges_to_merge, new_schema
             ),
             axis=1,
         )
-        add_schemas_edge_batch(account_id, edges_to_merge, created=latest_timestamp)
+        add_schemas_edge_batch(edges_to_merge, created=latest_timestamp)
         # filter out columns of added tables
         modified_tables = added_columns.table_name.unique()
         added_or_modified_tables["tables"].update(modified_tables)
@@ -521,7 +370,7 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             items_to_update_in_graph = []
             columns_to_update.apply(
                 lambda x: accumulate_updated_column(
-                    account_id, x, items_to_update_in_graph, new_schema
+                    x, items_to_update_in_graph, new_schema
                 ),
                 axis=1,
             )
@@ -531,25 +380,23 @@ def update_diff_from_existing_schema(new_schema, account_id, latest_timestamp):
             len_chunks = len(items_to_update_in_graph_chunks)
             for i, chunk in enumerate(items_to_update_in_graph_chunks):
                 logger.info(f"Updating columns chunk {i + 1}/{len_chunks}")
-                update_properties_in_graph_batch(account_id, chunk)
-        delete_table_info_for_embedding_batch(
-            account_id, added_or_modified_tables, db_name
-        )
+                update_properties_in_graph_batch(chunk)
+
         return added_or_modified_tables
     except Exception as err:
         raise Exception(f'Error in "update_diff_from_existing_schema": {err}')
 
 
-def get_tables_columns(account_id, db_id, schema):
+def get_tables_columns(db_id, schema):
     if db_id is None:
-        query = """MATCH(db:db{account_id:$account_id})-[:schema]->(s:schema{name:$schema})-[:schema]->
+        query = """MATCH(db:db)-[:schema]->(s:schema{name:$schema})-[:schema]->
                     (t:table)-[:schema]->(c:column)
                     WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
                         coalesce(c.deleted, false) = false 
                     RETURN t.name as table_name, c.name as col_name 
                 """
     else:
-        query = """MATCH(db:db{id:$db_id,account_id:$account_id})-[:schema]->(s:schema{name:$schema})-[:schema]->
+        query = """MATCH(db:db{id:$db_id})-[:schema]->(s:schema{name:$schema})-[:schema]->
                     (t:table)-[:schema]->(c:column)
                     WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
                         coalesce(c.deleted, false) = false 
@@ -558,7 +405,7 @@ def get_tables_columns(account_id, db_id, schema):
     result = pd.DataFrame(
         conn.query_read_only(
             query=query,
-            parameters={"db_id": db_id, "account_id": account_id, "schema": schema},
+            parameters={"db_id": db_id, "schema": schema},
         )
     )
     result = result.groupby("table_name")["col_name"].apply(list).reset_index()
@@ -566,14 +413,10 @@ def get_tables_columns(account_id, db_id, schema):
     return result
 
 
-def remove_embedding_property(props: dict):
-    if "embedding" in props:
-        del props["embedding"]
-    return props
 
 
-def delete_table(table_id, account_id, deleted_time=datetime.now()):
-    query = """ MATCH (n:table {id: $table_id, account_id: $account_id})-[:schema]->(c:column)
+def delete_table(table_id, deleted_time=datetime.now()):
+    query = """ MATCH (n:table {id: $table_id})-[:schema]->(c:column)
                 SET n.deleted = True
                 SET n.deleted_time = $deleted_time
                 SET c.deleted = True
@@ -582,91 +425,67 @@ def delete_table(table_id, account_id, deleted_time=datetime.now()):
     conn.query_write(
         query=query,
         parameters={
-            "account_id": account_id,
             "table_id": table_id,
             "deleted_time": deleted_time,
         },
     )
 
 
-def update_properties_in_graph_batch(account_id, items):
+def update_properties_in_graph_batch(items):
     query = """
             UNWIND $items as item
             WITH item, item.props.description as new_description, 
             apoc.map.removeKeys(item.props, ["description"]) as item_props_no_description 
-            CALL apoc.merge.node.eager([item.label], {id: item.id, account_id: $account_id}, {}, item_props_no_description) 
+            CALL apoc.merge.node.eager([item.label], {id: item.id}, {}, item_props_no_description) 
             YIELD node
             // keep existing description unless it is null
             SET node.description = coalesce(node.description, new_description)  
             """
     conn.query_write(
         query=query,
-        parameters={"items": items, "account_id": account_id},
+        parameters={"items": items},
     )
 
 
-def update_properties_in_graph(account_id, item_id, node_label, new_parameters):
-    query = f""" MATCH (item:{node_label}{{account_id: $account_id, id:$table_id}})
+def update_properties_in_graph(item_id, node_label, new_parameters):
+    query = f""" MATCH (item:{node_label}{{id:$table_id}})
                  SET item += $new_parameters
             """
     conn.query_write(
         query=query,
         parameters={
             "table_id": item_id,
-            "account_id": account_id,
             "new_parameters": new_parameters,
         },
     )
 
 
-def delete_table_info_for_embedding_batch(
-    account_id, added_or_modified_tables, db_name
-):
-    account_simple_str = account_id.replace("-", "_")
-    tables = [
-        {"db": db_name, "schema": added_or_modified_tables["schema"], "name": t}
-        for t in added_or_modified_tables["tables"]
-    ]
-    query = f"""
-            UNWIND $tables as table
-            MATCH (t:table {{account_id: $account_id, name: table.name, db_name: table.db, schema_name: table.schema}})
-            SET t.table_info_for_embedding = null,
-            t.table_info_embedding_{account_simple_str} = null
-            """
-    conn.query_write(
-        query=query,
-        parameters={
-            "account_id": account_id,
-            "tables": tables,
-        },
-    )
 
 
-def delete_columns_batch(column_ids, account_id, deleted_time=datetime.now()):
+
+def delete_columns_batch(column_ids, deleted_time=datetime.now()):
     query = """UNWIND $column_ids as column_id
-               MATCH (c:column {id: column_id, account_id: $account_id}) 
+               MATCH (c:column {id: column_id}) 
                SET c.deleted = True 
                SET c.deleted_time = $deleted_time
             """
     conn.query_write(
         query=query,
         parameters={
-            "account_id": account_id,
             "column_ids": column_ids,
             "deleted_time": deleted_time,
         },
     )
 
 
-def delete_column(column_id, account_id, deleted_time=datetime.now()):
-    query = """MATCH (c:column {id: $column_id, account_id: $account_id}) 
+def delete_column(column_id, deleted_time=datetime.now()):
+    query = """MATCH (c:column {id: $column_id}) 
                SET c.deleted = True 
                SET c.deleted_time = $deleted_time
             """
     conn.query_write(
         query=query,
         parameters={
-            "account_id": account_id,
             "column_id": column_id,
             "deleted_time": deleted_time,
         },

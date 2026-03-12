@@ -36,167 +36,16 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-# def get_embeddings(account_id: str, is_embeddings: bool = False, provider: str = None):
-#     """
-#     Get embeddings client based on account configuration and provider.
-
-#     Args:
-#         account_id: Account identifier
-#         is_embeddings: Force enable embeddings
-#         provider: Embedding provider ('azure'). If None, uses environment variable.
-
-#     Returns:
-#         Embeddings client or None
-#     """
-#     is_omni_enabled = is_feature_enabled(account_id, Feature.OMNI)
-
-#     if is_embeddings or is_omni_enabled:
-#         # Determine provider
-#         if provider is None:
-#             provider = os.environ.get("LMX_AI_PROVIDER", "azure")
-
-#         embeddings_client = get_embeddings_client(provider)
-
-#         # Fallback to Azure if requested provider fails
-#         if embeddings_client is None and provider != "azure":
-#             embeddings_client = get_embeddings_client("azure")
-
-#         return embeddings_client
-
-#     return None
 
 
 def get_conn_credentials(account_id):
-    conn_creds = conn._get_connection_for_account(parameters={"account_id": account_id})
+    conn_creds = conn.get_connection()
     url = conn_creds._Neo4jConnection__uri
     username = conn_creds._Neo4jConnection__username
     password = conn_creds._Neo4jConnection__password
     return {"url": url, "username": username, "password": password}
 
 
-# def update_single_item_embedding(account_id, item_id, label):
-#     embeddings = get_embeddings(account_id)
-#     if embeddings is None:
-#         return
-
-#     account_simple_str = account_id.replace("-", "_")
-#     collection_name = f"{account_simple_str}_nodes_vector_store"
-
-#     # first, update general nodes' embeddings collection
-#     if label in [Labels.ATTR, Labels.BT]:
-#         if label == Labels.BT:
-#             query = """ MATCH (term:term {account_id:$account_id, id: $id})-[:term_of]->(attr:attribute)
-#                         WITH term, collect({text: "term_name: " + term.name + ", attribute_name: " + attr.name + ", description: " + coalesce(attr.description, 'null'), 
-#                         name: attr.name, label: labels(attr)[0], id: attr.id, account_id: $account_id}) as attr_docs 
-#                         RETURN [{text: "name: " + term.name + ", description: " + coalesce(term.description, 'null'), 
-#                         name: term.name, label: labels(term)[0], id: term.id, account_id: $account_id}] + attr_docs as docs
-#                     """
-#         if label == Labels.ATTR:
-#             query = """MATCH (term:term {account_id:$account_id})-[:term_of]->(attr:attribute {id: $id})
-#                        RETURN [{text: "term_name: " + term.name + ", attribute_name: " + attr.name + ", description: " + coalesce(attr.description, 'null'), 
-#                        name: attr.name, label: labels(attr)[0], id: attr.id, account_id: $account_id}] as docs
-#                     """
-#     else:
-#         query = f"""MATCH (n:{label} {{account_id:$account_id, id: $id}})
-#                     // WHERE coalesce(n.recommended,false)=false
-#                     RETURN [{{text: "name: " + n.name + ", description: " + coalesce(n.description, 'null'),
-#                     name: n.name, label: labels(n)[0], id: n.id, account_id: $account_id}}] as docs
-#                 """
-#     result = conn.query_read_only(
-#         query, parameters={"account_id": account_id, "id": item_id}
-#     )
-#     if len(result) > 0:
-#         result = result[0]["docs"]
-
-#     docs = [
-#         Document(
-#             page_content=item["text"] or "",
-#             metadata={
-#                 "id": item["id"],
-#                 "label": item["label"],
-#                 "account_id": item["account_id"],
-#                 "name": item["name"],
-#             },
-#         )
-#         for item in result
-#     ]
-
-#     # For single-item updates we want to REPLACE existing vectors for the same ids,
-#     # not just append new rows. We do this by directly deleting from the underlying
-#     # PGVector table (public.langchain_pg_embedding) using the metadata id, and then
-#     # inserting fresh embeddings via from_documents.
-#     ids_to_delete = [doc.metadata["id"] for doc in docs]
-#     if ids_to_delete:
-#         placeholders = ", ".join(["%s"] * len(ids_to_delete))
-#         delete_query = f"""
-#             DELETE FROM public.langchain_pg_embedding
-#             WHERE collection_id = (
-#                 SELECT uuid FROM public.langchain_pg_collection WHERE name = %s
-#             )
-#               AND cmetadata->>'id' IN ({placeholders})
-#         """
-#         pg_conn.delete_rows(delete_query, [collection_name, *ids_to_delete])
-
-#     PGVector.from_documents(
-#         documents=docs,
-#         embedding=embeddings,
-#         collection_name=collection_name,
-#         connection_string=pg_conn.connection_string,
-#     )
-
-#     # secondly, if a column or a table have been updated, update table_info embeddings collection
-#     if label in [Labels.COLUMN, Labels.TABLE]:
-#         if label == Labels.COLUMN:
-#             query = """MATCH (d:db{account_id:$account_id})-[:schema]->(s:schema)-[:schema]->(t:table)-[:schema]->(c:column {id: $id}) 
-#                     """
-#         else:
-#             query = """MATCH (d:db{account_id:$account_id})-[:schema]->(s:schema)-[:schema]->(t:table {id: $id})-[:schema]->(c:column) """
-#         query += """
-#                    WITH d, s, t, collect("{name: " + c.name +", data_type: " + c.data_type + ", description: " + coalesce(c.description, 'null') +"}") as columns
-#                    RETURN collect({text: "db_name: " + d.name + "schema_name: " + s.name + ", table_name: " + t.name + 
-#                    ", table_description: " + coalesce(t.description, 'null') + ", columns: " + apoc.text.join(columns, ' '),
-#                    name: t.name, label: labels(t)[0], id: t.id, account_id: $account_id}) as docs
-#                 """
-#         result = conn.query_read_only(
-#             query, parameters={"account_id": account_id, "id": item_id}
-#         )
-#         if len(result) > 0:
-#             result = result[0]["docs"]
-
-#         docs = [
-#             Document(
-#                 page_content=item["text"] or "",
-#                 metadata={
-#                     "id": item["id"],
-#                     "label": item["label"],
-#                     "account_id": item["account_id"],
-#                     "name": item["name"],
-#                 },
-#             )
-#             for item in result
-#         ]
-
-#         tables_collection_name = f"{account_simple_str}_tables_info_vector_store"
-
-#         # Same replacement logic for table/column info embeddings.
-#         ids_to_delete = [doc.metadata["id"] for doc in docs]
-#         if ids_to_delete:
-#             placeholders = ", ".join(["%s"] * len(ids_to_delete))
-#             delete_query = f"""
-#                 DELETE FROM public.langchain_pg_embedding
-#                 WHERE collection_id = (
-#                     SELECT uuid FROM public.langchain_pg_collection WHERE name = %s
-#                 )
-#                   AND cmetadata->>'id' IN ({placeholders})
-#             """
-#             pg_conn.delete_rows(delete_query, [tables_collection_name, *ids_to_delete])
-
-#         PGVector.from_documents(
-#             documents=docs,
-#             embedding=embeddings,
-#             collection_name=tables_collection_name,
-#             connection_string=pg_conn.connection_string,
-#         )
 
 
 def generate_embeddings_for_node_names_and_descriptions(account_id, list_of_labels):
