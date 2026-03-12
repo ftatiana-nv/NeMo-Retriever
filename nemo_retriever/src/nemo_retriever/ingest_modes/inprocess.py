@@ -1803,7 +1803,10 @@ class InProcessIngestor(Ingestor):
         neo4j_conn: Any = None,
     ) -> "InProcessIngestor":
         """Step 1 — Reflect DB schema / parse SQL files → write graph nodes to Neo4j."""
-        pass
+        from ..relational_db.extract_data import extract_relational_db
+
+        extract_relational_db(neo4j_conn=neo4j_conn, params=params)
+        return self
 
     def populate_structured_semantic_layer(
         self,
