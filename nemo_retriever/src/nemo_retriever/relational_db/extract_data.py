@@ -7,7 +7,6 @@ from nemo_retriever.relational_db.population.graph.utils import (
     load_pks,
     load_tables,
     load_columns,
-    load_views,
 )
 
 
@@ -40,11 +39,10 @@ def create_dataframe(settings):
 def data_for_populate_structured(settings):
     """Build the `data` dict expected by populate_structured_data from create_dataframe output."""
     tables, columns, views, queries, pks, fks = create_dataframe(settings)
-    tables = load_tables(tables, is_csv=False)
-    columns = load_columns(columns, is_csv=False)
-    views = load_views(views, is_csv=False)
-    pks = load_pks(pks, is_csv=False)
-    fks = load_fks(fks, is_csv=False)
+    tables = load_tables(tables)
+    columns = load_columns(columns)
+    pks = load_pks(pks)
+    fks = load_fks(fks)
     data = {
         "tables": tables,
         "columns": columns,
@@ -56,36 +54,21 @@ def data_for_populate_structured(settings):
     return data
 
 
-def parse_param(argv):
-    ret = {}
-    ret["data_interval_start"] = pendulum.parse(argv[1])
-    ret["data_interval_end"] = pendulum.parse(argv[2])
-    ret["connection_properties"] = argv[3]
-    return ret
+def main():
+    """Build data and run populate_structured_data (example entrypoint)."""
+    import logging
+    from nemo_retriever.relational_db.population.populate_data import populate_structured_data
+
+    logger = logging.getLogger(__name__)
+
+    settings = {"connection_properties": {"database": "./spider2.duckdb"}}
+    data = data_for_populate_structured(settings)
+    populate_structured_data(
+        data,
+        num_workers=4,
+        dialect="duckdb",
+    )
 
 
-
-# Example: build data for populate_structured_data, run population, then description suggestions
-import logging
-from nemo_retriever.relational_db.population.populate_data import populate_structured_data
-from nemo_retriever.relational_db.description_suggestion.description_dal import (
-    populate_description_suggestions_for_tables,
-)
-
-logger = logging.getLogger(__name__)
-
-ACCOUNT_ID = "your_account_id"
-
-settings = {"connection_properties": {"database": "./spider2.duckdb"}}
-data = data_for_populate_structured(settings)
-populate_structured_data(
-    data,
-    account_id=ACCOUNT_ID,
-    num_workers=4,
-    dialect="duckdb",
-    keep_string_values=False,
-)
-
-# # Generate and insert description suggestions for all tables (and later: other node types)
-# updated_table_ids = populate_description_suggestions_for_tables(ACCOUNT_ID)
-# logger.info("Description suggestions created for %d tables: %s", len(updated_table_ids), updated_table_ids)
+if __name__ == "__main__":
+    main()

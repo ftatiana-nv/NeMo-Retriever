@@ -9,7 +9,7 @@ logger = logging.getLogger("schemas_parser.py")
 
 
 def parse_df(
-    tables_df, columns_df, account_id, db_node=None, temp_schema_creation_flag=True
+    tables_df, columns_df, db_node=None, temp_schema_creation_flag=True
 ):
     """
     Every schema manager assumes a single database in the input file
@@ -24,7 +24,7 @@ def parse_df(
             name=db_name,
             label=Labels.DB,
             props={"name": db_name, "pulled": datetime.now()},
-            match_props={"name": db_name, "account_id": account_id},
+            match_props={"name": db_name},
         )
 
     unique_schema_names = tables_df.schema.unique()
@@ -32,8 +32,8 @@ def parse_df(
 
     # create schema for temporary tables
     if temp_schema_creation_flag:
-        schema = Schema(account_id, db_node)
-        schema.create_schema_node(TEMP_SCHEMA_NAME, account_id, is_temp=True)
+        schema = Schema(db_node)
+        schema.create_schema_node(TEMP_SCHEMA_NAME, is_temp=True)
         schemas.update({TEMP_SCHEMA_NAME: schema})
 
     for schema_name in unique_schema_names:
@@ -42,8 +42,8 @@ def parse_df(
         schema_tables_df["is_temp"] = False
         schema_columns_df["is_temp"] = False
         logger.info(f"Started parsing schema {schema_name}.")
-        schema = Schema(account_id, db_node, schema_tables_df, schema_columns_df)
-        schema.create_schema_node(schema_name, account_id)
+        schema = Schema(db_node, schema_tables_df, schema_columns_df)
+        schema.create_schema_node(schema_name)
         schemas.update({schema.get_schema_name().lower(): schema})
         logger.info(f"Finished parsing schema {schema.get_schema_name()}.")
 

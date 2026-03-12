@@ -58,7 +58,8 @@ def chunks(lst, n):
 
 
 
-def load_tables(filepath_or_buffer, is_csv=True):
+def load_tables(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize and type a tables DataFrame. Expects a DataFrame only."""
     types = {
         "database": "category",
         "schema": "category",
@@ -71,46 +72,27 @@ def load_tables(filepath_or_buffer, is_csv=True):
         "last_altered": "string",
         "comment": "string",
     }
-    if is_csv:
-        df = pd.read_csv(
-            filepath_or_buffer,
-            dtype=types,
-        )
-        # read_csv can get columns list, but then we need to ignore the header to "fill" missing columns
-        # so this approch feels much more safe
-        for key in types.keys():
-            if key not in df:
-                df[key] = pd.NA
-    else:
-        if not isinstance(filepath_or_buffer, pd.DataFrame):
-            df = pd.DataFrame(filepath_or_buffer)
-        else:
-            df = filepath_or_buffer
+    df = df.copy() if df is not None and not df.empty else pd.DataFrame()
+    if df.empty:
+        return df
 
-        # Happens for temp schema after reset
-        if df.empty:
-            return df
+    if "row_count" not in df.columns:
+        df["row_count"] = list(range(1, len(df) + 1))
+    if "size" not in df.columns:
+        df["size"] = 0
+    if "retention_time" not in df.columns:
+        df["retention_time"] = 0
 
-        if "row_count" not in df.columns:
-            df["row_count"] = list(range(1, len(df) + 1))
-        if "size" not in df.columns:
-            df["size"] = 0
-        if "retention_time" not in df.columns:
-            df["retention_time"] = 0
+    for key in types.keys():
+        if key not in df.columns:
+            df[key] = pd.NA
 
-        # Ensure all columns in types exist so astype(dtype=types) does not raise KeyError.
-        for key in types.keys():
-            if key not in df.columns:
-                df[key] = pd.NA
+    df["row_count"] = pd.to_numeric(df["row_count"])
+    df["size"] = pd.to_numeric(df["size"])
+    df["retention_time"] = pd.to_numeric(df["retention_time"])
+    df = df.astype(dtype=types)
 
-        # If I understand corretcly, df.astype don't handle numeric numbers well.
-        df["row_count"] = pd.to_numeric(df["row_count"])
-        df["size"] = pd.to_numeric(df["size"])
-        df["retention_time"] = pd.to_numeric(df["retention_time"])
-        df = df.astype(dtype=types)
-    
-
-    # read_csv can do parse_dates, but most connectors don't have these fields so leaving it optional
+    # parse_dates / optional date fields
     if "last_altered" in df:
         df["last_altered"] = pd.to_datetime(
             df["last_altered"], utc=True, format="mixed"
@@ -131,7 +113,8 @@ def load_tables(filepath_or_buffer, is_csv=True):
     return df
 
 
-def load_columns(filepath_or_buffer, is_csv=True):
+def load_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize and type a columns DataFrame. Expects a DataFrame only."""
     types = {
         "database": "category",
         "schema": "category",
@@ -140,102 +123,31 @@ def load_columns(filepath_or_buffer, is_csv=True):
         "ordinal_position": "Int16",
         "data_type": "category",
         "default": "category",
-        "is_nullable": "category",  # Convert to boolean?
+        "is_nullable": "category",
         "length": "Int64",
         "scale": "Int16",
         "comment": "string",
     }
+    df = df.copy() if df is not None and not df.empty else pd.DataFrame()
+    if df.empty:
+        return df
 
-    if is_csv:
-        df = pd.read_csv(
-            filepath_or_buffer,
-            dtype=types,
-            encoding="ISO-8859-1",
-        )
-        for key in types.keys():
-            if key not in df:
-                df[key] = pd.NA
-    else:
-        if not isinstance(filepath_or_buffer, pd.DataFrame):
-            df = pd.DataFrame(filepath_or_buffer)
-        else:
-            df = filepath_or_buffer.copy()
+    for key in types.keys():
+        if key not in df.columns:
+            df[key] = pd.NA
 
-        # Happens for temp schema after reset
-        if df.empty:
-            return df
-
-        # Ensure all columns in types exist so to_numeric/astype do not raise KeyError.
-        for key in types.keys():
-            if key not in df.columns:
-                df[key] = pd.NA
-
-        # If I understand corretcly, df.astype don't handle numeric numbers well.
-        df["ordinal_position"] = pd.to_numeric(df["ordinal_position"])
-        df["length"] = pd.to_numeric(df["length"])
-        df["scale"] = pd.to_numeric(df["scale"])
-
-        df = df.astype(dtype=types)
+    df["ordinal_position"] = pd.to_numeric(df["ordinal_position"])
+    df["length"] = pd.to_numeric(df["length"])
+    df["scale"] = pd.to_numeric(df["scale"])
+    df = df.astype(dtype=types)
 
     return df
 
 
-def load_views(filepath_or_buffer, is_csv=True):
-    types = {
-        "database": "category",
-        "schema": "category",
-        "name": "string",
-        "view_definition": "string",
-        "id": "string",
-    }
-    if is_csv:
-        df = pd.read_csv(
-            filepath_or_buffer,
-            dtype=types,
-        )
-        for key in types.keys():
-            if key not in df:
-                df[key] = pd.NA
-    else:
-        if not isinstance(filepath_or_buffer, pd.DataFrame):
-            df = pd.DataFrame(filepath_or_buffer)
-        else:
-            df = filepath_or_buffer.copy()
-        if df.empty:
-            return df
-        for key in types.keys():
-            if key not in df.columns:
-                df[key] = pd.NA
-        df = df.astype(dtype=types)
-
-    return df
 
 
-def load_queries(filepath_or_buffer):
-    types = {
-        "database": "category",
-        "schema": "category",
-        "end_time": "string",
-        "query_text": "string",
-        "count": "Int64",  # not sure Int16 is big enough (highest number - 32K)
-        "id": "string",
-    }
-
-    # using chunks because of playtika. no idea why needed.
-    iterator = pd.read_csv(
-        filepath_or_buffer,
-        keep_default_na=False,
-        dtype=types,
-        chunksize=100,
-    )
-    to_return = pd.concat(iterator, ignore_index=True)
-    to_return["end_time"] = pd.to_datetime(
-        to_return["end_time"], utc=True, format="mixed"
-    )
-    return to_return
-
-
-def load_fks(filepath_or_buffer, is_csv=True):
+def load_fks(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize and type a foreign-keys DataFrame. Expects a DataFrame only."""
     types = {
         "created_on": "string",
         "pk_database_name": "string",
@@ -254,30 +166,18 @@ def load_fks(filepath_or_buffer, is_csv=True):
         "deferrability": "string",
         "rely": "boolean",
     }
-    if is_csv:
-        df = pd.read_csv(
-            filepath_or_buffer,
-            dtype=types,
-        )
-        for key in types.keys():
-            if key not in df:
-                df[key] = pd.NA
-    else:
-        if not isinstance(filepath_or_buffer, pd.DataFrame):
-            df = pd.DataFrame(filepath_or_buffer)
-        else:
-            df = filepath_or_buffer.copy()
-        if df.empty:
-            return df
-        for key in types.keys():
-            if key not in df.columns:
-                df[key] = pd.NA
-        df = df.astype(dtype=types)
-
+    df = df.copy() if df is not None and not df.empty else pd.DataFrame()
+    if df.empty:
+        return df
+    for key in types.keys():
+        if key not in df.columns:
+            df[key] = pd.NA
+    df = df.astype(dtype=types)
     return df
 
 
-def load_pks(filepath_or_buffer, is_csv=True):
+def load_pks(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize and type a primary-keys DataFrame. Expects a DataFrame only."""
     types = {
         "created_on": "string",
         "database_name": "string",
@@ -288,57 +188,11 @@ def load_pks(filepath_or_buffer, is_csv=True):
         "constraint_name": "string",
         "rely": "string",
     }
-    if is_csv:
-        df = pd.read_csv(
-            filepath_or_buffer,
-            dtype=types,
-        )
-        for key in types.keys():
-            if key not in df:
-                df[key] = pd.NA
-    else:
-        if not isinstance(filepath_or_buffer, pd.DataFrame):
-            df = pd.DataFrame(filepath_or_buffer)
-        else:
-            df = filepath_or_buffer.copy()
-        if df.empty:
-            return df
-        for key in types.keys():
-            if key not in df.columns:
-                df[key] = pd.NA
-        df = df.astype(dtype=types)
-
+    df = df.copy() if df is not None and not df.empty else pd.DataFrame()
+    if df.empty:
+        return df
+    for key in types.keys():
+        if key not in df.columns:
+            df[key] = pd.NA
+    df = df.astype(dtype=types)
     return df
-
-
-def load_terms(filepath, lines=True):
-    if len(filepath) > 0:
-        extension = os.path.splitext(filepath)[
-            1
-        ].lower()  # Extracts '.csv' or '.json' (lowercase)
-        if extension == ".csv":
-            terms_df = pd.read_csv(filepath)
-        elif extension == ".json":
-            terms_df = pd.read_json(filepath, lines=lines)
-        else:
-            raise Exception("Unknown extension.")
-
-        return terms_df
-
-    return None
-
-
-def load_global_terms(filepath):
-    global_terms = None
-    if len(filepath) > 0:
-        extension = os.path.splitext(filepath)[
-            1
-        ].lower()  # Extracts '.csv' or '.json' (lowercase)
-        if extension == ".json":
-            with open(filepath, "r") as file:
-                global_terms = json.load(file)
-            return global_terms
-        else:
-            raise Exception("Unknown extension.")
-
-    return None
