@@ -54,14 +54,26 @@ def data_for_populate_structured(settings):
     return data
 
 
-def main():
-    """Build data and run populate_structured_data (example entrypoint)."""
+def extract_relational_db(neo4j_conn=None, params=None):
+    """Build data and run populate_structured_data.
+
+    Args:
+        neo4j_conn: Active Neo4jConnectionManager instance (passed from the
+            orchestrating ingest step; created internally if not provided).
+        params: StructuredExtractParams instance.  When provided,
+            ``params.db_connection_string`` overrides the default database path.
+    """
     import logging
     from nemo_retriever.relational_db.population.populate_data import populate_structured_data
 
     logger = logging.getLogger(__name__)
 
-    settings = {"connection_properties": {"database": "./spider2.duckdb"}}
+    db_path = (
+        params.db_connection_string
+        if params is not None and params.db_connection_string is not None
+        else "./spider2.duckdb"
+    )
+    settings = {"connection_properties": {"database": db_path}}
     data = data_for_populate_structured(settings)
     populate_structured_data(
         data,
