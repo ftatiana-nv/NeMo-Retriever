@@ -1,7 +1,6 @@
 import logging
 import uuid
-from nemo_retriever.relational_db.population.graph.model.node import Node, clean_phrase
-from nemo_retriever.relational_db.population.graph.model.query import MissingDataError
+from nemo_retriever.relational_db.population.graph.model.node import Node
 from nemo_retriever.relational_db.population.graph.model.reserved_words import label_to_type
 import pandas as pd
 import numpy as np
@@ -17,14 +16,12 @@ TEMP_SCHEMA_NAME = "temporary_schema"
 class Schema:
     def __init__(
         self,
-        account_id: str,
         db_node: Node = None,
         schema_tables_df: pd.DataFrame = None,
         schema_columns_df: pd.DataFrame = None,
         schema_name: str = None,
         is_creation_mode: bool = True,
     ):
-        self.account_id = account_id
         self.db_node = db_node
         self.schema_node = None
         self.schema_name = ""
@@ -97,14 +94,14 @@ class Schema:
                 )
 
             if is_creation_mode:
-                self.reset_tables_props(account_id)
-                self.reset_columns_props(account_id)
+                self.reset_tables_props()
+                self.reset_columns_props()
             else:
                 self.schema_name = schema_name
-                self.reset_slim_columns_props(account_id)
-                self.reset_slim_tables_props(account_id)
+                self.reset_slim_columns_props()
+                self.reset_slim_tables_props()
 
-    def reset_tables_props(self, account_id):
+    def reset_tables_props(self):
         self.tables_df["props"] = self.tables_df.apply(
             lambda x: {
                 "name": x["table_name"],
@@ -119,8 +116,6 @@ class Schema:
                 "last_altered": (
                     None if pd.isna(x["last_altered"]) else x["last_altered"]
                 ),
-                "description": None if pd.isna(x["comment"]) else x["comment"],
-                "clean_name": clean_phrase(x.table_name),
                 "id": x.id,
                 "label": Labels.TEMP_TABLE if x["is_temp"] else Labels.TABLE,
             },
@@ -131,12 +126,11 @@ class Schema:
                 "db_name": self.db_node.name,
                 "name": x["table_name"],
                 "schema_name": x["schema"],
-                "account_id": account_id,
             },
             axis=1,
         )
 
-    def reset_columns_props(self, account_id):
+    def reset_columns_props(self):
         self.columns_df["props"] = self.columns_df.apply(
             lambda x: {
                 "name": x["column_name"].strip('"'),
@@ -149,7 +143,6 @@ class Schema:
                 "scale": None if pd.isna(x["scale"]) else x["scale"],
                 "ordinal_position": x["ordinal_position"],
                 "description": None if pd.isna(x["comment"]) else x["comment"],
-                "clean_name": clean_phrase(x.column_name.strip('"')),
                 "id": x.id,
                 "label": Labels.TEMP_COLUMN if x["is_temp"] else Labels.COLUMN,
                 "type": label_to_type(
@@ -164,12 +157,11 @@ class Schema:
                 "name": x.column_name,
                 "table_name": x.table_name,
                 "schema_name": x.schema,
-                "account_id": account_id,
             },
             axis=1,
         )
 
-    def reset_slim_tables_props(self, account_id):
+    def reset_slim_tables_props(self):
         self.tables_df["props"] = self.tables_df.apply(
             lambda x: {
                 "name": x["name"],
@@ -184,12 +176,11 @@ class Schema:
                 "db_name": self.db_node.name,
                 "name": x["table_name"],
                 "schema_name": self.schema_name,
-                "account_id": account_id,
             },
             axis=1,
         )
 
-    def reset_slim_columns_props(self, account_id):
+    def reset_slim_columns_props(self):
         self.columns_df["props"] = self.columns_df.apply(
             lambda x: {
                 "name": x["name"].strip('"'),
@@ -205,7 +196,6 @@ class Schema:
                 "name": x["name"],
                 "table_name": x["table_name"],
                 "schema_name": self.schema_name,
-                "account_id": account_id,
             },
             axis=1,
         )
@@ -319,11 +309,9 @@ class Schema:
     def create_column_node(
         self,
         column_name,
-        account_id,
         table_name="",
         data_type=None,
         id=None,
-        clean_name=None,
         description=None,
         is_nullable=None,
         default=None,
@@ -341,12 +329,10 @@ class Schema:
             "name": column_name,
             "table_name": table_name,
             "schema_name": self.schema_name,
-            "account_id": account_id,
         }
         props = self.update_column_props_by_arguments(
             props,
             data_type,
-            clean_name,
             description,
             is_nullable,
             default,
@@ -458,7 +444,6 @@ class Schema:
             )
             self.create_column_node(
                 column_name,
-                self.account_id,
                 column_df.iloc[0]["table_name"],
                 data_type,
                 id=id,
@@ -491,9 +476,7 @@ class Schema:
     def create_table_node(
         self,
         table_name,
-        account_id,
         id=None,
-        clean_name=None,
         table_type=None,
         row_count=None,
         size=None,
@@ -510,7 +493,6 @@ class Schema:
             "db_name": self.get_db_name(),
             "name": table_name,
             "schema_name": self.schema_name,
-            "account_id": account_id,
         }
         props = self.update_table_props_by_arguments(
             props,
@@ -521,7 +503,6 @@ class Schema:
             created,
             last_altered,
             description,
-            clean_name,
         )
         table_node = Node(
             name=table_name,
@@ -616,9 +597,7 @@ class Schema:
             )
             self.create_table_node(
                 table_df.iloc[0]["table_name"],
-                self.account_id,
                 id,
-                None,
                 table_type,
                 row_count,
                 size,
@@ -634,7 +613,7 @@ class Schema:
         return self.schema_node
 
     def create_schema_node(
-        self, schema_name, account_id, id=None, clean_name=None, is_temp=False
+        self, schema_name, id=None, is_temp=False
     ):
         if self.schema_node is None:
             self.schema_name = schema_name
@@ -642,10 +621,7 @@ class Schema:
             match_props = {
                 "db_name": self.get_db_name(),
                 "name": schema_name,
-                "account_id": account_id,
             }
-            if clean_name is not None:
-                props.update({"clean_name": clean_name})
             self.schema_node = Node(
                 name=schema_name,
                 label=Labels.SCHEMA if not is_temp else Labels.TEMP_SCHEMA,
@@ -702,7 +678,6 @@ class Schema:
         created,
         last_altered,
         description,
-        clean_name,
     ):
         # The current behivor is that pandas defualt NA is empty string excepnt number properies
         if table_type:
@@ -718,17 +693,12 @@ class Schema:
             props.update({"created": created})
         if last_altered:
             props.update({"last_altered": last_altered})
-        if description:
-            props.update({"description": description})
-        if clean_name:
-            props.update({"clean_name": clean_name})
         return props
 
     def update_column_props_by_arguments(
         self,
         props,
         data_type,
-        clean_name,
         description,
         is_nullable,
         default,
@@ -738,8 +708,6 @@ class Schema:
     ):
         if data_type:
             props.update({"data_type": data_type})
-        if clean_name:
-            props.update({"clean_name": clean_name})
         if description:
             props.update({"description": description})
         if is_nullable:
