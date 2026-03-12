@@ -8,7 +8,6 @@ from nemo_retriever.relational_db.population.db.dal import (
     db_exists,
     update_node_property,
     delete_schema,
-    update_disconnected_sqls,
     update_diff_from_existing_schema,
 )
 from nemo_retriever.relational_db.population.graph.indexes import add_indices
@@ -22,28 +21,18 @@ from nemo_retriever.relational_db.population.graph.dal.schemas_dal import (
     delete_old_fks,
     reset_pks,
 )
-from nemo_retriever.relational_db.population.graph.parsers.sql.parse_queries_df import populate_views
 from nemo_retriever.relational_db.population.graph.services.schema import add_schema
 
-def populate_structured_data(
-    data,
-    account_id,
-    num_workers,
-    dialect,
-    keep_string_values
-):
+def populate_structured_data(data, num_workers, dialect):
     logger.info("Using Dialect: " + dialect)
 
-    # Make sure that the indices exist in the graph database
-    add_indices(account_id) 
+    add_indices()
 
     all_schemas = {}
 
     tables_df = data["tables"]
     columns_df = data["columns"]
 
-    # if in a single population there is more than one DB, then the temp schema will be created
-    # only for the first one (temp_schema_creation_flag is passed to populate_db function)
     temp_schema_creation_flag = True
 
     unique_databases = tables_df.database.unique()
@@ -54,50 +43,32 @@ def populate_structured_data(
         schemas, _, added_or_modified_tables = populate_db(
             sub_tables_df,
             sub_columns_df,
-            account_id,
             num_workers,
             temp_schema_creation_flag,
         )
-        # Temp hack for now
         all_schemas.update(schemas)
         temp_schema_creation_flag = (
             False if temp_schema_creation_flag else temp_schema_creation_flag
         )
-    # Do garbage collection after updating the graph:
-    # Search for SQLs that got disconnected from the DB tree
-    # update_disconnected_sqls(account_id)
 
     if "fks" in data:
-        populate_fks(account_id, fks=data["fks"])
+        populate_fks(fks=data["fks"])
     if "pks" in data:
-        populate_pks(account_id, pks=data["pks"])
+        populate_pks(pks=data["pks"])
 
-    failed_views = []
-    if "views" in data:
-        failed_views = populate_views(
-            all_schemas,
-            data["views"],
-            account_id,
-            num_workers,
-            dialect,
-            keep_string_values,
-        )
-        logger.info(f"Failed views: {len(failed_views)}")
-
-    return failed_views
+    return []
 
 
 def populate_db(
-    tables_df, columns_df, account_id, num_workers, temp_schema_creation_flag=True
+    tables_df, columns_df, num_workers, temp_schema_creation_flag=True
 ):
     added_or_modified_tables = []
     schemas, db_node = schemas_parser.parse_df(
         tables_df,
         columns_df,
-        account_id,
         temp_schema_creation_flag=temp_schema_creation_flag,
     )
-    existing_db_id, loaded = db_exists(account_id, db_node)
+    existing_db_id, loaded = db_exists(db_node)
 
     latest_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -113,25 +84,21 @@ def populate_db(
             }
             added_or_modified_tables_dict = add_schema(
                 schema,
-                account_id,
                 latest_timestamp,
                 num_workers,
                 added_or_modified_tables_dict,
             )
             if added_or_modified_tables_dict:
-                # if temporary schema, then added_or_modified_tables_dict is None
                 added_or_modified_tables.append(added_or_modified_tables_dict)
             logger.info(f"Added schema {schema_name} to db.")
 
-        update_node_property(
-            account_id, "db", str(db_node.get_id()), {"pulled": latest_timestamp}
-        )
+        update_node_property("db", str(db_node.get_id()), {"pulled": latest_timestamp})
 
         logger.info(f"Time took to add schemas:{time.time() - before_adding_schemas}")
         return schemas, db_node, added_or_modified_tables
 
     before_adding_schema = time.time()
-    existing_schemas = get_schemas_ids_and_names(account_id, existing_db_id)
+    existing_schemas = get_schemas_ids_and_names(existing_db_id)
     existing_schema_names = [s["schema_name"].lower() for s in existing_schemas]
     new_schemas = schemas.keys()
     schemas_to_add = [
@@ -147,7 +114,6 @@ def populate_db(
         }
         added_or_modified_tables_dict = add_schema(
             schema,
-            account_id,
             latest_timestamp,
             num_workers,
             added_or_modified_tables_dict,
@@ -165,7 +131,7 @@ def populate_db(
         schema.get_db_node().replace_id(existing_db_id)
     with ThreadPoolExecutor(num_workers) as executor:
         for r in executor.map(
-            lambda schema: _update_schema(schema, account_id, latest_timestamp),
+            lambda schema: _update_schema(schema, latest_timestamp),
             schemas_to_update,
         ):
             if len(r["tables"]) > 0:
@@ -190,30 +156,30 @@ def populate_db(
     ]
     logger.info(f"Deleting schemas: {[s['name'] for s in schemas_props_to_delete]}")
     for schema_id in schemas_ids_to_delete:
-        delete_schema(schema_id, account_id)
+        delete_schema(schema_id)
 
     logger.info(f"Time took to update schemas:{time.time() - before_adding_schema}")
 
-    update_node_property(account_id, "db", existing_db_id, {"pulled": latest_timestamp})
+    update_node_property("db", existing_db_id, {"pulled": latest_timestamp})
     return schemas, db_node, added_or_modified_tables
 
 
-def populate_fks(account_id, fks):
+def populate_fks(fks):
     logger.info("Adding FKs.")
     last_seen = datetime.now()
-    add_fks(account_id, fks, last_seen)
-    delete_old_fks(account_id, last_seen)
+    add_fks(fks, last_seen)
+    delete_old_fks(last_seen)
 
 
-def populate_pks(account_id, pks):
+def populate_pks(pks):
     logger.info("Adding PKs.")
-    reset_pks(account_id)
-    add_pks(account_id, pks)
+    reset_pks()
+    add_pks(pks)
 
 
-def _update_schema(schema, account_id, latest_timestamp):
+def _update_schema(schema, latest_timestamp):
     added_or_modified_tables = update_diff_from_existing_schema(
-        schema, account_id, latest_timestamp
+        schema, latest_timestamp
     )
     logger.info(f"Updated schema {schema.get_schema_name()} to db.")
     return added_or_modified_tables
