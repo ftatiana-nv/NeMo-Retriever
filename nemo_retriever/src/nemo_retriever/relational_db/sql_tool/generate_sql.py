@@ -1,23 +1,34 @@
 import os
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from sqlalchemy import create_engine, inspect
-from deepagents import create_deep_agent 
-from deepagents.backends import FilesystemBackend  
+from deepagents import create_deep_agent
+from deepagents.backends import FilesystemBackend
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.tools.sql_database.tool import QuerySQLDatabaseTool
 from langchain_community.utilities import SQLDatabase
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
+_deep_agent = None
 
-def _get_sql_agent(base_dir: str):
+
+def _make_llm() -> ChatNVIDIA:
+    return ChatNVIDIA(
+        base_url=os.environ.get("LLM_INVOKE_URL"),
+        api_key=os.environ.get("LLM_API_KEY"),
+        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
+    )
+
+
+def _get_deep_agent(base_dir: str):
     """
     Create and cache the Deep Agent with all Snowflake schema tools.
     This runs only once per process; subsequent calls reuse the same agent,
     avoiding repeated schema discovery and tool construction for every question.
     """
-    global _sql_agent
-    if _sql_agent is not None:
-        return _sql_agent
+    global _deep_agent
+    if _deep_agent is not None:
+        return _deep_agent
 
     # Connect to DuckDB database
     duckdb_path = os.environ.get("DUCKDB_PATH", "./spider2.duckdb")
@@ -43,11 +54,7 @@ def _get_sql_agent(base_dir: str):
     print(f"Discovered {all_table_count} tables across {len(user_schemas)} schemas")
 
     # Step 3: Create multiple SQLDatabase instances (one per schema) in parallel
-    llm = ChatNVIDIA(
-        base_url=os.environ.get("LLM_INVOKE_URL"),
-        api_key=os.environ.get("LLM_API_KEY"),
-        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
-    )
+    llm = _make_llm()
     all_sql_tools = []
 
     def process_schema(schema):
@@ -91,10 +98,15 @@ def _get_sql_agent(base_dir: str):
 
     print(f"Total SQL tools created: {len(all_sql_tools)}")
 
+    # Add a global query execution tool on the full engine (no schema filter)
+    # so the agent can run cross-schema queries in addition to per-schema tools.
+    global_db = SQLDatabase(engine)
+    all_sql_tools.append(QuerySQLDatabaseTool(db=global_db))
+
     # Step 4: Create the Deep Agent with all schema tools
     # Only load the core operational skills (schema-exploration, query-writing).
     # Final formatting is handled directly in query-writing (JSON {sql_code, answer, result}).
-    _sql_agent = create_deep_agent(
+    _deep_agent = create_deep_agent(
         model=llm,
         memory=["./AGENTS.md"],  # Agent identity and general instructions
         skills=[
@@ -106,7 +118,9 @@ def _get_sql_agent(base_dir: str):
         backend=FilesystemBackend(root_dir=base_dir),  # Persistent file storage
     )
 
-    return _sql_agent
+    return _deep_agent
+
+
 
 
 def _parse_markdown_answer(text: str) -> dict | None:
@@ -309,7 +323,7 @@ def _invoke_agent_with_prompt(agent, prompt: str, base_dir: str) -> dict:
 
 def get_sql_tool_response(question: str):
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    agent = _get_sql_agent(base_dir)
+    agent = _get_deep_agent(base_dir)
     prompt = (
         "You are a SQL benchmark assistant.\n\n"
         f"User question: {question}\n\n"
@@ -319,9 +333,11 @@ def get_sql_tool_response(question: str):
 
 def get_sql_tool_response_top_k(question: str, top_k: int = 15):
     """Like get_sql_tool_response, but first retrieves the top_k most relevant
-    tables from LanceDB and injects them into the prompt so the agent focuses
-    only on those tables when writing SQL.
+    tables from LanceDB and injects them into the prompt. Since the full schema
+    context is already in the prompt, no DB tools are needed — the LLM generates
+    SQL directly from the retrieved context.
     """
+    from langchain_core.messages import HumanMessage
     from nemo_retriever.retriever import Retriever
 
     retriever = Retriever(
@@ -338,13 +354,32 @@ def get_sql_tool_response_top_k(question: str, top_k: int = 15):
             table_context_lines.append(f"{i}. {text}")
     table_context = "\n".join(table_context_lines)
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    agent = _get_sql_agent(base_dir)
     prompt = (
         "You are a SQL benchmark assistant.\n\n"
         f"The following {len(table_context_lines)} most relevant tables were retrieved for this question:\n"
         f"{table_context}\n\n"
         f"User question: {question}\n\n"
-        "Use only the tables listed above when writing your SQL query."
+        "Use only the tables listed above when writing your SQL query. "
+        "Return a JSON object with keys: sql_code, answer, result."
     )
-    return _invoke_agent_with_prompt(agent, prompt, base_dir)
+
+    llm = _make_llm()
+    response = llm.invoke([HumanMessage(content=prompt)])
+    content = response.content if hasattr(response, "content") else str(response)
+
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict) and {"sql_code", "answer", "result"}.issubset(parsed.keys()):
+            return {
+                "sql_code": parsed.get("sql_code", ""),
+                "answer": parsed.get("answer", ""),
+                "result": parsed.get("result"),
+            }
+    except Exception:
+        pass
+
+    return {
+        "sql_code": "",
+        "answer": content,
+        "result": None,
+    }
