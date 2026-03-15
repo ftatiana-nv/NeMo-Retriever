@@ -238,22 +238,8 @@ def _extract_structured_answer(result: dict) -> dict | None:
     return None
 
 
-def get_sql_tool_response(question: str):
-
-    # Get base directory
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Get or create the cached Deep Agent (with all schema tools)
-    agent = _get_sql_agent(base_dir)
-
-    # Keep the user prompt simple. All detailed behavior (how to write SQL,
-    # execute it, and format the final structured answer) is defined in skills.
-    prompt = (
-        "You are a SQL benchmark assistant.\n\n"
-        f"User question: {question}\n\n"
-    )
-
-    # Retry DeepAgent invocation a few times in case of transient errors
+def _invoke_agent_with_prompt(agent, prompt: str, base_dir: str) -> dict:
+    """Invoke the Deep Agent with retries and structured answer extraction."""
     max_retries = 3
     last_error: Exception | None = None
 
@@ -263,7 +249,6 @@ def get_sql_tool_response(question: str):
                 {"messages": [{"role": "user", "content": prompt}]}
             )
 
-            # Try to extract structured answer from any message (scanning from the end)
             parsed = _extract_structured_answer(result)
             if parsed is not None:
                 result_dict = {
@@ -274,7 +259,6 @@ def get_sql_tool_response(question: str):
                 _save_answer_json(base_dir, result_dict)
                 return result_dict
 
-            # If we didn't find structured JSON, fall back to last message content
             messages = result.get("messages") or []
             final_message = messages[-1] if messages else None
             raw_content = (
@@ -283,8 +267,6 @@ def get_sql_tool_response(question: str):
                 else None
             )
 
-            # If not in messages, try to read the answer from the filesystem where
-            # the answer-formatting skill may have saved it.
             answer_path = os.path.join(
                 base_dir, "skills", "answer-formatting", "answer.json"
             )
@@ -308,7 +290,6 @@ def get_sql_tool_response(question: str):
                         f"Warning: Failed to read answer-formatting output file: {file_err}"
                     )
 
-            # Fallback: treat whatever we have as a plain-text answer
             if raw_content is not None:
                 return {
                     "sql_code": "",
@@ -316,14 +297,54 @@ def get_sql_tool_response(question: str):
                     "result": None,
                 }
         except Exception as e:  # noqa: PERF203
-            print(
-                f"Error in get_sql_tool_response (attempt {attempt}/{max_retries}): {e}"
-            )
+            print(f"Error invoking agent (attempt {attempt}/{max_retries}): {e}")
             last_error = e
 
-    # All retries failed – return a fallback response with the last error message
     return {
         "sql_code": "",
         "answer": f"Deep agent failed after {max_retries} attempts: {last_error}",
         "result": None,
     }
+
+
+def get_sql_tool_response(question: str):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    agent = _get_sql_agent(base_dir)
+    prompt = (
+        "You are a SQL benchmark assistant.\n\n"
+        f"User question: {question}\n\n"
+    )
+    return _invoke_agent_with_prompt(agent, prompt, base_dir)
+
+
+def get_sql_tool_response_top_k(question: str, top_k: int = 15):
+    """Like get_sql_tool_response, but first retrieves the top_k most relevant
+    tables from LanceDB and injects them into the prompt so the agent focuses
+    only on those tables when writing SQL.
+    """
+    from nemo_retriever.retriever import Retriever
+
+    retriever = Retriever(
+        lancedb_uri=os.environ.get("LANCEDB_URI", "lancedb"),
+        lancedb_table=os.environ.get("LANCEDB_TABLE", "nv-ingest"),
+        top_k=top_k,
+    )
+    hits = retriever.query(question)
+
+    table_context_lines = []
+    for i, hit in enumerate(hits, 1):
+        text = (hit.get("text") or "").strip()
+        if text:
+            table_context_lines.append(f"{i}. {text}")
+    table_context = "\n".join(table_context_lines)
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    agent = _get_sql_agent(base_dir)
+    prompt = (
+        "You are a SQL benchmark assistant.\n\n"
+        f"The following {len(table_context_lines)} most relevant tables were retrieved for this question:\n"
+        f"{table_context}\n\n"
+        f"User question: {question}\n\n"
+        "Use only the tables listed above when writing your SQL query."
+    )
+    return _invoke_agent_with_prompt(agent, prompt, base_dir)
