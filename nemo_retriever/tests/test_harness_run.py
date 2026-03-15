@@ -310,6 +310,8 @@ def test_run_single_writes_results_with_run_metadata(monkeypatch, tmp_path: Path
         metrics.pages = 3181
         metrics.ingest_secs = 12.5
         metrics.pages_per_sec_ingest = 254.48
+        metrics.rows_processed = 9543
+        metrics.rows_per_sec_ingest = 763.44
         metrics.recall_metrics = {"recall@5": 0.9}
         return 0
 
@@ -359,6 +361,8 @@ def test_run_single_writes_results_with_run_metadata(monkeypatch, tmp_path: Path
             "pages": 3181,
             "ingest_secs": 12.5,
             "pages_per_sec_ingest": 254.48,
+            "rows_processed": 9543,
+            "rows_per_sec_ingest": 763.44,
             "recall_5": 0.9,
         },
         "run_metadata": {
