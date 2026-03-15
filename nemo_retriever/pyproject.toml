@@ -82,6 +82,10 @@ dependencies = [
   "vllm==0.16.0",
   "duckdb>=1.2.0",
   "neo4j>=5.0",
+  "sqlalchemy>=2.0.48",
+  "langchain-nvidia-ai-endpoints>=0.3.0",
+  "langchain-community>=0.3.0",
+  "deepagents>=0.1.0",
 ]
 
 [project.optional-dependencies]
