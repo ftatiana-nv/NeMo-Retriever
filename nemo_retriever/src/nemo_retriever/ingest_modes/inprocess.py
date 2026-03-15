@@ -28,7 +28,6 @@ from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 from nemo_retriever.model.local import NemotronOCRV1, NemotronPageElementsV3, NemotronParseV12
-from nemo_retriever.chart.chart_detection import graphic_elements_ocr_page_elements
 from nemo_retriever.page_elements import detect_page_elements_v3
 from nemo_retriever.ocr.ocr import _crop_b64_image_by_norm_bbox, nemotron_parse_page_elements, ocr_page_elements
 from nemo_retriever.table.table_detection import table_structure_ocr_page_elements
@@ -1107,6 +1106,8 @@ class InProcessIngestor(Ingestor):
             # When use_graphic_elements is True, charts go through the
             # combined graphic-elements + OCR stage instead of OCR-only.
             if use_graphic_elements and kwargs.get("extract_charts") is True:
+                from nemo_retriever.chart.chart_detection import graphic_elements_ocr_page_elements  # noqa: PLC0415
+
                 print("Adding graphic-elements+OCR extraction task")
                 ge_invoke_url = kwargs.get("graphic_elements_invoke_url", "")
                 ocr_invoke_url = kwargs.get("ocr_invoke_url", kwargs.get("invoke_url", ""))
