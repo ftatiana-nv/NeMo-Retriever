@@ -46,7 +46,6 @@ except Exception as e:  # pragma: no cover
 
 from ..utils.convert import SUPPORTED_EXTENSIONS, convert_to_pdf_bytes
 from ..ingestor import Ingestor
-from ..relational_db.neo4j_connection import get_neo4j_conn
 from ..params import ASRParams
 from ..params import AudioChunkParams
 from ..params import EmbedParams
@@ -1783,6 +1782,8 @@ class InProcessIngestor(Ingestor):
         7. embed             ← receives the DataFrame from step 6
         8. vdb_upload        ← receives the embedded DataFrame from step 7 (table "nv-ingest-structured")
         """
+        from ..relational_db.neo4j_connection import get_neo4j_conn  # noqa: PLC0415
+
         neo4j_conn = get_neo4j_conn()
 
         self.extract_structured(params=params, neo4j_conn=neo4j_conn)
