@@ -305,6 +305,12 @@ class Retriever:
 
         return results
 
+    def generate_sql(self, query: str) -> str:
+        """Generate a SQL query for a given natural language query."""
+        from nemo_retriever.relational_db.generate_sql import generate_sql
+
+        return generate_sql(query)
+
 
 # Backward compatibility alias.
 retriever = Retriever
