@@ -9,7 +9,7 @@ Neo4j connection and session management for the relational_db stack.
 import os
 import logging
 
-from neo4j import GraphDatabase, exceptions, WRITE_ACCESS, READ_ACCESS
+from neo4j import GraphDatabase, WRITE_ACCESS, READ_ACCESS
 
 logger = logging.getLogger(__name__)
 
@@ -56,38 +56,25 @@ class Neo4jConnection:
         assert self.__driver is not None, "Driver not initialized!"
         db = "neo4j"
         session = None
-        response = None
-        tries = 3
-        for i in range(tries):
-            try:
-                session = self.__driver.session(
-                    database=db,
-                    default_access_mode=default_access_mode,
-                )
-                result = session.run(query, parameters)
-                # Consume and copy data before closing session to avoid BufferError
-                # ("Existing exports of data: object cannot be re-sized")
-                if ret_type == "data":
-                    response = [dict(record) for record in result]
-                else:
-                    response = result.graph()
-            except exceptions.TransientError as te:
-                if i < tries - 1:
-                    continue
-                else:
-                    logger.error(f"CYPHER QUERY FAILED {i} times with TransientError")
-                    if session is not None:
-                        session.close()
-                    raise te
-            except Exception as e:
-                logger.error(f"CYPHER QUERY FAILED: {query}, parameters: {parameters}")
-                if session is not None:
-                    session.close()
-                raise e
-            break
-        if session is not None:
-            session.close()
-        return response
+        try:
+            session = self.__driver.session(
+                database=db,
+                default_access_mode=default_access_mode,
+            )
+            result = session.run(query, parameters)
+            # Consume and copy data before closing session to avoid BufferError
+            # ("Existing exports of data: object cannot be re-sized")
+            if ret_type == "data":
+                response = [dict(record) for record in result]
+            else:
+                response = result.graph()
+            return response
+        except Exception as e:
+            logger.error(f"CYPHER QUERY FAILED: {query}, parameters: {parameters}")
+            raise e
+        finally:
+            if session is not None:
+                session.close()
 
 
 class Neo4jConnectionManager:
