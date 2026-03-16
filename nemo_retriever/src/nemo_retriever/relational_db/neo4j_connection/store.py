@@ -76,41 +76,31 @@ class Neo4jConnection:
             if session is not None:
                 session.close()
 
+    def query_write(self, query, parameters=None):
+        """Run a write query. For API compatibility with previous Manager."""
+        return self.query(query, parameters)
 
-class Neo4jConnectionManager:
-    def __init__(self):
-        self.conn = Neo4jConnection(
+    def query_read_only(self, query, parameters=None):
+        """Run a read-only query. For API compatibility with previous Manager."""
+        return self.query(query, parameters, default_access_mode=READ_ACCESS)
+
+    def query_graph(self, query, parameters=None):
+        """Run a query and return the graph. For API compatibility with previous Manager."""
+        return self.query(query, parameters, ret_type="graph")
+
+
+_conn = None
+
+
+def get_neo4j_conn() -> Neo4jConnection:
+    """Return the shared Neo4j connection (singleton)."""
+    global _conn
+    if _conn is None:
+        _conn = Neo4jConnection(
             os.environ["NEO4J_URI"],
             os.environ["NEO4J_USERNAME"],
             os.environ["NEO4J_PASSWORD"],
         )
-
         logger.info("Verify Connectivity for default Neo4j")
-        self.conn.verify_connectivity()
-
-    def get_connection(self):
-        """Return the Neo4j connection."""
-        return self.conn
-
-    def verify_connectivity(self):
-        return self.conn.verify_connectivity()
-
-    def query_write(self, query, parameters):
-        conn = self.get_connection()
-        return conn.query(query, parameters)
-
-    def query_read_only(self, query, parameters):
-        conn = self.get_connection()
-        return conn.query(query, parameters, READ_ACCESS)
-
-    def query_graph(self, query, parameters):
-        conn = self.get_connection()
-        return conn.query(query, parameters, ret_type="graph")
-
-
-_manager = None
-
-
-def get_neo4j_conn():
-    global _manager
-    return _manager or (_manager := Neo4jConnectionManager())
+        _conn.verify_connectivity()
+    return _conn
