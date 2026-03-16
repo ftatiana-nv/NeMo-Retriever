@@ -58,7 +58,7 @@ def extract_relational_db(neo4j_conn=None, params=None):
     """Build data and run populate_structured_data.
 
     Args:
-        neo4j_conn: Active Neo4jConnectionManager instance (passed from the
+        neo4j_conn: Active Neo4j connection (from get_neo4j_conn(), passed from the
             orchestrating ingest step; created internally if not provided).
         params: StructuredExtractParams instance.  When provided,
             ``params.db_connection_string`` overrides the default database path.
