@@ -206,6 +206,74 @@ def _parse_markdown_answer(text: str) -> dict | None:
     return None
 
 
+def _extract_json_from_markdown(text: str) -> dict | None:
+    """Extract a JSON object from markdown content (e.g. inside ```json ... ``` or ``` ... ```)."""
+    import re
+    # 1) Try parsing the whole content as JSON
+    text = (text or "").strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    # 2) Look for ```json ... ``` block
+    match = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
+    if match:
+        block = match.group(1).strip()
+        try:
+            obj = json.loads(block)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    # 3) Look for any {...} that might be the JSON object (last occurrence, likely the intended one)
+    brace = text.rfind("{")
+    if brace != -1:
+        depth = 0
+        end = -1
+        for i in range(brace, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            try:
+                obj = json.loads(text[brace : end + 1])
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                pass
+    return None
+
+
+def _parse_sql_response_content(content: str) -> dict | None:
+    """Parse LLM response into {sql_code, answer, result}. Handles raw JSON or JSON inside markdown."""
+    if not (content and isinstance(content, str)):
+        return None
+    parsed = _extract_json_from_markdown(content)
+    if parsed is None:
+        return None
+    required = {"sql_code", "answer", "result"}
+    if not required.issubset(parsed.keys()):
+        # Allow missing "result" by normalizing
+        if "sql_code" in parsed and "answer" in parsed:
+            return {
+                "sql_code": parsed.get("sql_code", ""),
+                "answer": parsed.get("answer", ""),
+                "result": parsed.get("result"),
+            }
+        return None
+    return {
+        "sql_code": parsed.get("sql_code", ""),
+        "answer": parsed.get("answer", ""),
+        "result": parsed.get("result"),
+    }
+
+
 def _save_answer_json(base_dir: str, answer: dict) -> None:
     """
     Persist the structured SQL answer to skills/answer-formatting/answer.json
@@ -383,16 +451,9 @@ def get_sql_tool_response_top_k(
     response = llm.invoke([HumanMessage(content=prompt)])
     content = response.content if hasattr(response, "content") else str(response)
 
-    try:
-        parsed = json.loads(content)
-        if isinstance(parsed, dict) and {"sql_code", "answer", "result"}.issubset(parsed.keys()):
-            return {
-                "sql_code": parsed.get("sql_code", ""),
-                "answer": parsed.get("answer", ""),
-                "result": parsed.get("result"),
-            }
-    except Exception:
-        pass
+    parsed = _parse_sql_response_content(content)
+    if parsed is not None:
+        return parsed
 
     return {
         "sql_code": "",
