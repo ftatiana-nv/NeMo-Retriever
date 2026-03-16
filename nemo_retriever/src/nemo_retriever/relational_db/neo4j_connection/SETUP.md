@@ -122,7 +122,7 @@ vdb.run(results)
 Connection and utilities for the relational_db stack (graph population, schema, etc.) live in `nemo_retriever.relational_db.neo4j_connection`:
 
 ```python
-from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn, Neo4jConnectionManager
+from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 conn = get_neo4j_conn()
 result = conn.query_read_only("MATCH (n) RETURN count(n) AS c", {"account_id": "..."})

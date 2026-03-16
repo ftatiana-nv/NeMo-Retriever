@@ -222,7 +222,7 @@ class ingestor:
         Uses SQLAlchemy reflection and/or SQL file parsing to produce
         Database, Schema, Table, Column, View and Query nodes together with
         their relationships.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("extract_structured")
 
@@ -236,7 +236,7 @@ class ingestor:
         Auto-creates Term/Attribute nodes and MAPS_TO_TABLE / MAPS_TO_COLUMN
         relationships for entities that are not already covered by the
         semantic-layer definition.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("populate_structured_semantic_layer")
 
@@ -249,7 +249,7 @@ class ingestor:
 
         Writes a ``pii_type`` property and a HAS_PII_TYPE relationship onto
         each Column node that matches a known PII pattern.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("detect_structured_pii")
 
@@ -262,7 +262,7 @@ class ingestor:
 
         Parses SQL query logs, computes Table/Column co-occurrence frequencies,
         and writes ``usage_weight`` float properties back onto the graph nodes.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("populate_structured_usage_weights")
 
@@ -275,7 +275,7 @@ class ingestor:
 
         Descriptions are written back to Neo4j as a ``description`` property
         on Database, Schema, Table, Column, View and Query nodes.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("generate_structured_descriptions")
 
@@ -290,7 +290,7 @@ class ingestor:
         ``_embed_modality`` = ``"text"``, and ``metadata`` (JSON blob with
         entity_type, entity_name, node_id).  No embedding is computed here;
         the returned DataFrame is passed directly to the embed step.
-        ``neo4j_conn`` is the shared Neo4jConnectionManager from neo4j_store.py.
+        ``neo4j_conn`` is the shared Neo4j connection from get_neo4j_conn().
         """
         self._not_implemented("fetch_structured")
 
