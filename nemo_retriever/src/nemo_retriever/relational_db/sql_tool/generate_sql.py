@@ -412,9 +412,6 @@ def get_sql_tool_response(question: str):
 def get_sql_tool_response_top_k(
     question: str,
     top_k: int = 15,
-    *,
-    lancedb_uri: str | None = None,
-    lancedb_table: str | None = None,
 ):
     """Like get_sql_tool_response, but first retrieves the top_k most relevant
     tables from LanceDB and injects them into the prompt. Since the full schema
@@ -425,8 +422,7 @@ def get_sql_tool_response_top_k(
     from nemo_retriever.retriever import Retriever
 
     retriever = Retriever(
-        lancedb_uri=lancedb_uri or os.environ.get("LANCEDB_URI", "lancedb"),
-        lancedb_table=lancedb_table or os.environ.get("LANCEDB_TABLE", "nv-ingest"),
+        lancedb_table="nv-ingest-structured",
         top_k=top_k,
     )
     hits = retriever.query(question)
