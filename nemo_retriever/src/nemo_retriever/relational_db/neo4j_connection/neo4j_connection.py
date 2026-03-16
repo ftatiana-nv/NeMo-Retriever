@@ -77,15 +77,15 @@ class Neo4jConnection:
                 session.close()
 
     def query_write(self, query, parameters=None):
-        """Run a write query. For API compatibility with previous Manager."""
+        """Run a write query."""
         return self.query(query, parameters)
 
     def query_read_only(self, query, parameters=None):
-        """Run a read-only query. For API compatibility with previous Manager."""
+        """Run a read-only query."""
         return self.query(query, parameters, default_access_mode=READ_ACCESS)
 
     def query_graph(self, query, parameters=None):
-        """Run a query and return the graph. For API compatibility with previous Manager."""
+        """Run a query and return the graph."""
         return self.query(query, parameters, ret_type="graph")
 
 
