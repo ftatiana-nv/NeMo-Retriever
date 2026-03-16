@@ -1867,7 +1867,7 @@ class InProcessIngestor(Ingestor):
     ) -> Any:
         """Orchestrate the full 8-step structured ingestion pipeline.
 
-        Acquires the shared Neo4jConnectionManager once via get_neo4j_conn() and
+        Acquires the shared Neo4j connection once via get_neo4j_conn() and
         passes it to every step so no step creates its own connection.
 
         Runs the following steps in order:
