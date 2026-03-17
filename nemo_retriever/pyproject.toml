@@ -73,11 +73,13 @@ dependencies = [
   "scipy>=1.11.0",
   "nvidia-ml-py",
   "duckdb>=1.2.0",
+  "duckdb-engine>=0.13.0",
   "neo4j>=5.0",
   "sqlalchemy>=2.0.48",
   "langchain-nvidia-ai-endpoints>=0.3.0",
   "langchain-community>=0.3.0",
   "deepagents>=0.1.0",
+  "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]

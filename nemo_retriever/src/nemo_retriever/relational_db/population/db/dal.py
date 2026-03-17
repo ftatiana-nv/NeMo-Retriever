@@ -6,12 +6,10 @@ from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
-from nemo_retriever.relational_db.population.graph.dal.utils_dal import get_entity_before_update
 from nemo_retriever.relational_db.population.graph.utils import chunks
-from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, label_to_type
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
 from nemo_retriever.relational_db.population.graph.dal.schemas_dal import load_schema_from_graph, add_schemas_edge
 
-from nemo_retriever.relational_db.population.graph.model.schema import TEMP_SCHEMA_NAME
 conn = get_neo4j_conn()
 
 
@@ -104,21 +102,7 @@ def add_schemas_edge_batch(edges, created):
         raise Exception('Error in "add_schemas_edge_batch"')
 
 
-def accumulate_deleted_column_props(deleted_column, list_for_event_log):
-    list_for_event_log.append(
-        {
-            "id": deleted_column.props_graph["id"],
-            "before_update": get_entity_before_update(
-                deleted_column.props_graph["id"], Labels.COLUMN
-            ),
-            "payload": None,
-        }
-    )
-
-
-def accumulate_added_column_props(
-    added_column, list_for_event_log, edges_to_add, new_schema
-):
+def accumulate_added_column_props(added_column, edges_to_add, new_schema):
     new_table_node_props = new_schema.get_table_node_props(added_column.table_name)
     new_table_node_match_props = new_schema.get_table_node_match_props(
         added_column.table_name
@@ -132,14 +116,6 @@ def accumulate_added_column_props(
             "to_identProps": added_column.match_props_files,
             "u_props": added_column.props_files,
             "optional_edge_props": {"schema": added_column.schema},
-        }
-    )
-    list_for_event_log.append(
-        {
-            "id": added_column.props_files["id"],
-            "before_update": None,
-            "payload": remove_embedding_property(added_column.props_files),
-            "table_name": added_column.table_name,
         }
     )
 
@@ -298,11 +274,8 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
             columns_merge["column_name_lower_files"].isnull()
         ]
         logger.info(f"Columns to delete in schema {schema_name}: {len(deleted_columns)}")
-        entities = []
-        deleted_columns.apply(
-            lambda x: accumulate_deleted_column_props(x, entities), axis=1
-        )
-        delete_columns_batch([x["id"] for x in entities])
+        ids_to_delete = deleted_columns["props_graph"].apply(lambda p: p["id"]).tolist()
+        delete_columns_batch(ids_to_delete)
         # filter out columns of deleted tables
         modified_tables = deleted_columns.table_name.unique()
         added_or_modified_tables["tables"].update(modified_tables)
@@ -318,12 +291,9 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
             columns_merge["column_name_lower_graph"].isnull()
         ]
         logger.info(f"Columns to add in schema {schema_name}: {len(added_columns)}")
-        entities = []
         edges_to_merge = []
         added_columns.apply(
-            lambda x: accumulate_added_column_props(
-                x, entities, edges_to_merge, new_schema
-            ),
+            lambda x: accumulate_added_column_props(x, edges_to_merge, new_schema),
             axis=1,
         )
         add_schemas_edge_batch(edges_to_merge, created=latest_timestamp)

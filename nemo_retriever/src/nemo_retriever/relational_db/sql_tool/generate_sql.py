@@ -1,23 +1,44 @@
 import os
+
+# Load .env from current working directory so LLM_API_KEY, LLM_INVOKE_URL are set (run from repo root)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from sqlalchemy import create_engine, inspect
-from deepagents import create_deep_agent 
-from deepagents.backends import FilesystemBackend  
+from deepagents import create_deep_agent
+from deepagents.backends import FilesystemBackend
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.tools.sql_database.tool import QuerySQLDatabaseTool
 from langchain_community.utilities import SQLDatabase
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 
+_deep_agent = None
 
-def _get_sql_agent(base_dir: str):
+
+def _make_llm() -> ChatNVIDIA:
+    # Prefer LLM_API_KEY; fall back to NVIDIA_API_KEY (used by LangChain NVIDIA docs)
+    api_key = os.environ.get("LLM_API_KEY")
+    return ChatNVIDIA(
+        base_url=os.environ.get("LLM_INVOKE_URL"),
+        api_key=api_key,
+        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
+    )
+
+
+def _get_deep_agent(base_dir: str):
     """
     Create and cache the Deep Agent with all Snowflake schema tools.
     This runs only once per process; subsequent calls reuse the same agent,
     avoiding repeated schema discovery and tool construction for every question.
     """
-    global _sql_agent
-    if _sql_agent is not None:
-        return _sql_agent
+    global _deep_agent
+    if _deep_agent is not None:
+        return _deep_agent
 
     # Connect to DuckDB database
     duckdb_path = os.environ.get("DUCKDB_PATH", "./spider2.duckdb")
@@ -43,11 +64,7 @@ def _get_sql_agent(base_dir: str):
     print(f"Discovered {all_table_count} tables across {len(user_schemas)} schemas")
 
     # Step 3: Create multiple SQLDatabase instances (one per schema) in parallel
-    llm = ChatNVIDIA(
-        base_url=os.environ.get("LLM_INVOKE_URL"),
-        api_key=os.environ.get("LLM_API_KEY"),
-        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
-    )
+    llm = _make_llm()
     all_sql_tools = []
 
     def process_schema(schema):
@@ -91,10 +108,15 @@ def _get_sql_agent(base_dir: str):
 
     print(f"Total SQL tools created: {len(all_sql_tools)}")
 
+    # Add a global query execution tool on the full engine (no schema filter)
+    # so the agent can run cross-schema queries in addition to per-schema tools.
+    global_db = SQLDatabase(engine)
+    all_sql_tools.append(QuerySQLDatabaseTool(db=global_db))
+
     # Step 4: Create the Deep Agent with all schema tools
     # Only load the core operational skills (schema-exploration, query-writing).
     # Final formatting is handled directly in query-writing (JSON {sql_code, answer, result}).
-    _sql_agent = create_deep_agent(
+    _deep_agent = create_deep_agent(
         model=llm,
         memory=["./AGENTS.md"],  # Agent identity and general instructions
         skills=[
@@ -106,7 +128,9 @@ def _get_sql_agent(base_dir: str):
         backend=FilesystemBackend(root_dir=base_dir),  # Persistent file storage
     )
 
-    return _sql_agent
+    return _deep_agent
+
+
 
 
 def _parse_markdown_answer(text: str) -> dict | None:
@@ -182,6 +206,74 @@ def _parse_markdown_answer(text: str) -> dict | None:
     return None
 
 
+def _extract_json_from_markdown(text: str) -> dict | None:
+    """Extract a JSON object from markdown content (e.g. inside ```json ... ``` or ``` ... ```)."""
+    import re
+    # 1) Try parsing the whole content as JSON
+    text = (text or "").strip()
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+    # 2) Look for ```json ... ``` block
+    match = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
+    if match:
+        block = match.group(1).strip()
+        try:
+            obj = json.loads(block)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    # 3) Look for any {...} that might be the JSON object (last occurrence, likely the intended one)
+    brace = text.rfind("{")
+    if brace != -1:
+        depth = 0
+        end = -1
+        for i in range(brace, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+        if end != -1:
+            try:
+                obj = json.loads(text[brace : end + 1])
+                if isinstance(obj, dict):
+                    return obj
+            except Exception:
+                pass
+    return None
+
+
+def _parse_sql_response_content(content: str) -> dict | None:
+    """Parse LLM response into {sql_code, answer, result}. Handles raw JSON or JSON inside markdown."""
+    if not (content and isinstance(content, str)):
+        return None
+    parsed = _extract_json_from_markdown(content)
+    if parsed is None:
+        return None
+    required = {"sql_code", "answer", "result"}
+    if not required.issubset(parsed.keys()):
+        # Allow missing "result" by normalizing
+        if "sql_code" in parsed and "answer" in parsed:
+            return {
+                "sql_code": parsed.get("sql_code", ""),
+                "answer": parsed.get("answer", ""),
+                "result": parsed.get("result"),
+            }
+        return None
+    return {
+        "sql_code": parsed.get("sql_code", ""),
+        "answer": parsed.get("answer", ""),
+        "result": parsed.get("result"),
+    }
+
+
 def _save_answer_json(base_dir: str, answer: dict) -> None:
     """
     Persist the structured SQL answer to skills/answer-formatting/answer.json
@@ -238,22 +330,8 @@ def _extract_structured_answer(result: dict) -> dict | None:
     return None
 
 
-def get_sql_tool_response(question: str):
-
-    # Get base directory
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Get or create the cached Deep Agent (with all schema tools)
-    agent = _get_sql_agent(base_dir)
-
-    # Keep the user prompt simple. All detailed behavior (how to write SQL,
-    # execute it, and format the final structured answer) is defined in skills.
-    prompt = (
-        "You are a SQL benchmark assistant.\n\n"
-        f"User question: {question}\n\n"
-    )
-
-    # Retry DeepAgent invocation a few times in case of transient errors
+def _invoke_agent_with_prompt(agent, prompt: str, base_dir: str) -> dict:
+    """Invoke the Deep Agent with retries and structured answer extraction."""
     max_retries = 3
     last_error: Exception | None = None
 
@@ -263,7 +341,6 @@ def get_sql_tool_response(question: str):
                 {"messages": [{"role": "user", "content": prompt}]}
             )
 
-            # Try to extract structured answer from any message (scanning from the end)
             parsed = _extract_structured_answer(result)
             if parsed is not None:
                 result_dict = {
@@ -274,7 +351,6 @@ def get_sql_tool_response(question: str):
                 _save_answer_json(base_dir, result_dict)
                 return result_dict
 
-            # If we didn't find structured JSON, fall back to last message content
             messages = result.get("messages") or []
             final_message = messages[-1] if messages else None
             raw_content = (
@@ -283,8 +359,6 @@ def get_sql_tool_response(question: str):
                 else None
             )
 
-            # If not in messages, try to read the answer from the filesystem where
-            # the answer-formatting skill may have saved it.
             answer_path = os.path.join(
                 base_dir, "skills", "answer-formatting", "answer.json"
             )
@@ -308,7 +382,6 @@ def get_sql_tool_response(question: str):
                         f"Warning: Failed to read answer-formatting output file: {file_err}"
                     )
 
-            # Fallback: treat whatever we have as a plain-text answer
             if raw_content is not None:
                 return {
                     "sql_code": "",
@@ -316,14 +389,70 @@ def get_sql_tool_response(question: str):
                     "result": None,
                 }
         except Exception as e:  # noqa: PERF203
-            print(
-                f"Error in get_sql_tool_response (attempt {attempt}/{max_retries}): {e}"
-            )
+            print(f"Error invoking agent (attempt {attempt}/{max_retries}): {e}")
             last_error = e
 
-    # All retries failed – return a fallback response with the last error message
     return {
         "sql_code": "",
         "answer": f"Deep agent failed after {max_retries} attempts: {last_error}",
+        "result": None,
+    }
+
+
+def get_sql_tool_response(question: str):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    agent = _get_deep_agent(base_dir)
+    prompt = (
+        "You are a SQL benchmark assistant.\n\n"
+        f"User question: {question}\n\n"
+    )
+    return _invoke_agent_with_prompt(agent, prompt, base_dir)
+
+
+def get_sql_tool_response_top_k(
+    question: str,
+    top_k: int = 15,
+):
+    """Like get_sql_tool_response, but first retrieves the top_k most relevant
+    tables from LanceDB and injects them into the prompt. Since the full schema
+    context is already in the prompt, no DB tools are needed — the LLM generates
+    SQL directly from the retrieved context.
+    """
+    from langchain_core.messages import HumanMessage
+    from nemo_retriever.retriever import Retriever
+
+    retriever = Retriever(
+        lancedb_table="nv-ingest-structured",
+        top_k=top_k,
+    )
+    hits = retriever.query(question)
+
+    table_context_lines = []
+    for i, hit in enumerate(hits, 1):
+        text = (hit.get("text") or "").strip()
+        if text:
+            table_context_lines.append(f"{i}. {text}")
+    table_context = "\n".join(table_context_lines)
+
+    prompt = (
+        "You are a SQL benchmark assistant.\n\n"
+        f"The following {len(table_context_lines)} most relevant tables were retrieved for this question:\n"
+        f"{table_context}\n\n"
+        f"User question: {question}\n\n"
+        "Use only the tables listed above when writing your SQL query. "
+        "Return a JSON object with keys: sql_code, answer, result."
+    )
+
+    llm = _make_llm()
+    response = llm.invoke([HumanMessage(content=prompt)])
+    content = response.content if hasattr(response, "content") else str(response)
+
+    parsed = _parse_sql_response_content(content)
+    if parsed is not None:
+        return parsed
+
+    return {
+        "sql_code": "",
+        "answer": content,
         "result": None,
     }
