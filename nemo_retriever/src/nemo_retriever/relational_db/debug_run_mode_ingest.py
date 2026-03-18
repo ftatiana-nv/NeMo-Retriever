@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Local debug script to run run_mode_ingest. Run from repo root with PYTHONPATH=nemo_retriever/src.
+"""Local debug script to run run_mode_ingest (structured path). Part of relational_db.
 
-To see embedding models allowed for your NVIDIA API key: python debug_run_mode_ingest.py --list-models
+Run from repo root:
+  PYTHONPATH=nemo_retriever/src python -m nemo_retriever.relational_db.debug_run_mode_ingest
 
-To debug .embed and .vdb_upload on the structured path:
-- embed_params and vdb_params below are required; otherwise ingest_structured() runs
-  fetch_structured() but has no tasks and skips embed + vdb_upload.
-- Exact call sites and I/O: see EMBED_VDB_DEBUG_GUIDE.md.
-- Breakpoints: inprocess.run_pipeline_tasks_on_df before/after the line that calls
-  embed_text_main_text_embed (input/output DataFrame); inprocess._embed_group line with
-  model.embed(batch, ...) for the actual embed input (list of strings).
-- To compare with PDF path: run
-  PYTHONPATH=nemo_retriever/src python -m nemo_retriever.examples.inprocess_pipeline doc /path/to/file.pdf
+List embedding models for your NVIDIA API key:
+  PYTHONPATH=nemo_retriever/src python -m nemo_retriever.relational_db.debug_run_mode_ingest --list-models
+
+Structured path: embed_params and vdb_params are required; otherwise ingest_structured() only runs
+fetch_structured() and skips embed + vdb_upload. Structured data is written to table nv-ingest-structured.
+Breakpoints: inprocess.run_pipeline_tasks_on_df (embed_text_main_text_embed); inprocess._embed_group (model.embed).
 """
 
 from __future__ import annotations
@@ -37,14 +35,18 @@ from nemo_retriever.params import (
 )
 
 
+def _get_embed_api_key() -> str:
+    """Return embedding API key from env (LLM_API_KEY or NVIDIA_API_KEY)."""
+    return (os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY") or "").strip()
+
+
 def _check_embed_key() -> None:
     """Print whether embedding API key is set (masked). Run before ingest to debug 401."""
-    key = os.environ.get("NVIDIA_API_KEY") or ""
-    if not key or not key.strip():
+    key = _get_embed_api_key()
+    if not key:
         print("DEBUG: No embedding API key found. Set LLM_API_KEY or NVIDIA_API_KEY (or load .env).")
         return
-    # Mask: show only first 4 and last 4 chars
-    k = key.strip()
+    k = key
     if len(k) <= 12:
         masked = "*" * len(k)
     else:
@@ -55,7 +57,7 @@ def _check_embed_key() -> None:
 def list_embedding_models() -> None:
     """Call NVIDIA Inference API GET /v1/models and print embedding models for your key."""
     base = os.environ.get("NVIDIA_INFERENCE_BASE", "https://inference-api.nvidia.com")
-    key = ( os.environ.get("NVIDIA_API_KEY") or "").strip()
+    key = _get_embed_api_key()
     if not key:
         print("Set LLM_API_KEY or NVIDIA_API_KEY (e.g. in .env) then run again.")
         return
@@ -73,7 +75,6 @@ def list_embedding_models() -> None:
     if not models:
         print("No models in response. Raw:", data)
         return
-    # Prefer models whose id contains 'embed'; show all if none match.
     ids = [m.get("id") for m in models if m.get("id")]
     embed_ids = [i for i in ids if "embed" in i.lower()]
     show = embed_ids if embed_ids else ids
@@ -90,31 +91,21 @@ def main() -> None:
     if "--list-models" in sys.argv:
         list_embedding_models()
         return
-    _check_embed_key()  # remove after debugging 401
+    _check_embed_key()
 
-    # Inprocess mode. Pass txt file(s) to run the txt pipeline (extract_txt -> embed -> vdb_upload).
-    create_params = IngestorCreateParams(
-        documents=[],  # or multiple: ["./data/a.txt", "./data/b.txt"]  "/Users/tfrenklach/Desktop/NeMo-Retriever/data/test.txt"
-    )
+    create_params = IngestorCreateParams(documents=[])
     ingest_params = IngestExecuteParams(show_progress=True)
+    structured_params = StructuredExtractParams(db_connection_string="./spider2.duckdb")
+    # Set structured_params = None to skip structured path when Neo4j is not running.
 
-    # Optional: run structured extract (DuckDB + Neo4j). Requires Neo4j at NEO4J_URI (default localhost:7687).
-    # Set to None to skip structured path when Neo4j is not running.
-    _structured_params_ready = StructuredExtractParams(db_connection_string="./spider2.duckdb")
-    structured_params = _structured_params_ready 
-
-    # Required for structured path to run embed + vdb_upload. Without these,
-    # ingest_structured() only runs fetch_structured() and returns the DataFrame.
-    # NVIDIA Inference API. Use exact id from --list-models (e.g. nvidia/nvidia/... for inference-api.nvidia.com).
     embed_params = EmbedParams(
         model_name="nvidia/nvidia/llama-3.2-nv-embedqa-1b-v2",
         embed_modality="text",
         text_column="text",
         inference_batch_size=16,
         embedding_endpoint="https://inference-api.nvidia.com",
-        embedding_api_key=os.environ.get("NVIDIA_API_KEY"),
+        embedding_api_key=_get_embed_api_key() or None,
     )
-    # Unstructured path (documents → extract_txt → embed → vdb_upload) writes here.
     vdb_params = VdbUploadParams(
         lancedb=dict(
             lancedb_uri="lancedb",
