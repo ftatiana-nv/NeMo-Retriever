@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""DuckDB engine wrapper for in-process SQL execution.
+"""DuckDB connector for in-process SQL execution.
 
 Wraps ``duckdb.connect()`` with helpers to register pandas DataFrames or
 scan CSV/Parquet/JSON files directly from the filesystem.  No server or Docker
@@ -12,10 +12,10 @@ Example
 -------
 ::
 
-    from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
+    from nemo_retriever.relational_db.connectors.duckdb import DuckDB
 
-    engine = DuckDBEngine({"database": "./spider2.duckdb"})
-    rows = engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
+    conn = DuckDB({"database": "./spider2.duckdb"})
+    rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
     # rows -> [{"flight_id": 1, ...}]
 """
 
@@ -31,7 +31,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-class DuckDBEngine:
+class DuckDB:
     """In-process DuckDB connection with convenience helpers.
 
     Parameters
