@@ -5,10 +5,10 @@ This guide walks you through loading the [Spider2-lite](https://github.com/xlang
 Spider2-lite contains **30 databases** (Airlines, Baseball, Chinook, etc.), each stored as a folder of JSON files. The setup script loads them into a single `spider2.duckdb` file with **one schema per database**, so you query like:
 
 ```python
-engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
+conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
 ```
 
-SQL generation (NL → SQL) is handled by your own LLM — this module provides the data loading and execution layer via `DuckDBEngine`.
+SQL generation (NL → SQL) is handled by your own LLM — this module provides the data loading and execution layer via the `DuckDB` connector.
 
 ---
 
@@ -54,7 +54,7 @@ uv pip install duckdb
 ## 3 — Run the one-time setup script
 
 ```bash
-python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py
+python nemo_retriever/src/nemo_retriever/relational_db/connectors/setup_spider2.py
 ```
 
 This script will:
@@ -65,7 +65,7 @@ This script will:
 ### Custom paths
 
 ```bash
-python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py \
+python nemo_retriever/src/nemo_retriever/relational_db/connectors/setup_spider2.py \
     --spider2-dir ~/projects/spider2 \
     --db ~/data/spider2.duckdb
 ```
@@ -83,12 +83,12 @@ python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py \
 ## 4 — Verify the data loaded
 
 ```python
-from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
+from nemo_retriever.relational_db.connectors.duckdb import DuckDB
 
-engine = DuckDBEngine({"database": "./spider2.duckdb"})
-print(engine.list_schemas())             # ['Airlines', 'Baseball', 'chinook', ...]
-print(engine.schema_tables("Airlines"))  # ['flights', 'airports_data', ...]
-engine.close()
+conn = DuckDB({"database": "./spider2.duckdb"})
+print(conn.list_schemas())             # ['Airlines', 'Baseball', 'chinook', ...]
+print(conn.schema_tables("Airlines"))  # ['flights', 'airports_data', ...]
+conn.close()
 ```
 
 ---
@@ -98,12 +98,12 @@ engine.close()
 Each Spider2-lite database is a schema. Reference tables as `<Schema>.<table>`:
 
 ```python
-from nemo_retriever.structured_data.duckdb_engine import DuckDBEngine
+from nemo_retriever.relational_db.connectors.duckdb import DuckDB
 
-engine = DuckDBEngine({"database": "./spider2.duckdb"})
+conn = DuckDB({"database": "./spider2.duckdb"})
 
 # Direct SQL
-rows = engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
+rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
 print(rows)
 
 # With your own LLM generating the SQL
@@ -111,10 +111,10 @@ sql = your_llm_call(
     question="How many flights were delayed?",
     schema_context="Airlines database with tables: flights, airports_data, bookings, ..."
 )
-rows = engine.execute(sql)
+rows = conn.execute(sql)
 print(rows)
 
-engine.close()
+conn.close()
 ```
 
 ### Available databases
@@ -152,7 +152,7 @@ python evaluate.py --predictions ./results.json
 source .venv/bin/activate
 ```
 
-Then query via Python using `DuckDBEngine` as shown in Step 5.
+Then query via Python using the `DuckDB` connector as shown in Step 5.
 
 ---
 
@@ -160,7 +160,7 @@ Then query via Python using `DuckDBEngine` as shown in Step 5.
 
 ```bash
 cd ~/spider2 && git pull
-python nemo_retriever/src/nemo_retriever/structured_data/setup_spider2.py --overwrite
+python nemo_retriever/src/nemo_retriever/relational_db/connectors/setup_spider2.py --overwrite
 ```
 
 ---
