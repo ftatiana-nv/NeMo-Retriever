@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Spider2 bulk loaders for DuckDBEngine.
+"""Spider2 bulk loaders for DuckDB.
 
 Provides two functions:
 - ``load_spider2_lite``: loads Spider2-lite JSON databases (one schema per DB).
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Union
 import pandas as pd
 
 if TYPE_CHECKING:
-    from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
+    from nemo_retriever.relational_db.connectors.duckdb import DuckDB
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def _sanitize(name: str) -> str:
     return ("s_" + s) if s and s[0].isdigit() else s or "unnamed"
 
 
-def _load_spider2_lite_json(engine: "DuckDBEngine", schema: str, table: str, json_path: Path) -> None:
+def _load_spider2_lite_json(engine: "DuckDB", schema: str, table: str, json_path: Path) -> None:
     """Load a single Spider2-lite JSON file into a DuckDB table."""
     try:
         raw = _json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
@@ -58,7 +58,7 @@ def _load_spider2_lite_json(engine: "DuckDBEngine", schema: str, table: str, jso
 
 
 def load_spider2_lite(
-    engine: "DuckDBEngine",
+    engine: "DuckDB",
     spider2_lite_dir: Union[str, Path],
     *,
     overwrite: bool = False,
@@ -71,7 +71,7 @@ def load_spider2_lite(
     Parameters
     ----------
     engine:
-        A connected ``DuckDBEngine`` instance.
+        A connected ``DuckDB`` instance.
     spider2_lite_dir:
         Root of the ``spider2-lite`` directory (e.g. ``~/spider2/spider2-lite``).
     overwrite:
@@ -135,7 +135,7 @@ def load_spider2_lite(
 
 
 def load_spider2(
-    engine: "DuckDBEngine",
+    engine: "DuckDB",
     spider2_data_dir: Union[str, Path],
     *,
     recursive: bool = True,
@@ -147,7 +147,7 @@ def load_spider2(
     Parameters
     ----------
     engine:
-        A connected ``DuckDBEngine`` instance.
+        A connected ``DuckDB`` instance.
     spider2_data_dir:
         Root directory of the Spider2 data (e.g. ``~/spider2/spider2-duckdb/data``).
     recursive:
