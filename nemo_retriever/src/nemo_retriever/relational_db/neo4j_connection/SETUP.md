@@ -102,33 +102,6 @@ conn.verify_connectivity()
 
 ---
 
-## 6 — Ingest embeddings (client)
-
-For ingesting embeddings into Neo4j via the NV-Ingest client:
-
-```python
-from nv_ingest_client.util.vdb.neo4j import Neo4jVDB
-
-vdb = Neo4jVDB(
-    index_name="nv-ingest",
-    node_label="Document",
-    dense_dim=2048,
-    similarity_function="cosine",
-)
-vdb.create_index()
-vdb.run(results)
-```
-
-Connection and utilities for the relational_db stack (graph population, schema, etc.) live in `nemo_retriever.relational_db.neo4j_connection`:
-
-```python
-from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
-
-conn = get_neo4j_conn()
-result = conn.query_read_only("MATCH (n) RETURN count(n) AS c", {"account_id": "..."})
-```
-
----
 
 ## Day-to-day workflow
 
@@ -161,7 +134,6 @@ Neo4j native vector indexes require **Neo4j 5.11+**. The Docker image used (`neo
 
 **Password mismatch**  
 Recreate the container after changing `.env`: `docker compose --profile graph down neo4j -v && docker compose --profile graph up -d neo4j`
-
 
 
 
