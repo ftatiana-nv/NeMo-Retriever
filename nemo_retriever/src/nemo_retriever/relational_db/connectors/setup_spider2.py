@@ -7,22 +7,22 @@
 
 Each database in spider2-lite becomes a DuckDB schema, so you can query:
 
-    engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
+    conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
 
 Run once per machine (from the repo root):
 
-    python3 nemo_retriever/src/nemo_retriever/relational_db/db_setup/setup_spider2.py
+    python3 nemo_retriever/src/nemo_retriever/relational_db/connectors/setup_spider2.py
 
 Optional flags:
 
-    python3 nemo_retriever/src/nemo_retriever/relational_db/db_setup/setup_spider2.py \\
+    python3 nemo_retriever/src/nemo_retriever/relational_db/connectors/setup_spider2.py \\
         --spider2-dir ~/my_spider2 --db ./my.duckdb --overwrite
 
-After this completes, query via DuckDBEngine:
+After this completes, query via DuckDB:
 
-    from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
-    engine = DuckDBEngine({"database": "./spider2.duckdb"})
-    rows = engine.execute("SELECT * FROM Airlines.flights LIMIT 5")
+    from nemo_retriever.relational_db.connectors.duckdb import DuckDB
+    conn = DuckDB({"database": "./spider2.duckdb"})
+    rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
 """
 
 from __future__ import annotations
@@ -68,8 +68,8 @@ def _clone_spider2(target_dir: Path) -> None:
 
 def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     try:
-        from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
-        from nemo_retriever.relational_db.db_setup.spider2_loader import load_spider2_lite
+        from nemo_retriever.relational_db.connectors.duckdb import DuckDB
+        from nemo_retriever.relational_db.connectors.spider2_loader import load_spider2_lite
     except ImportError:
         print(
             "\n[error] Could not import nemo_retriever. Install the package first:\n\n"
@@ -93,11 +93,11 @@ def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     print(f"\n[ddb ] {action} data from {spider2_lite_dir}")
     print(f"[ddb ] Database → {db_path}\n")
 
-    engine = DuckDBEngine({"database": str(db_path)})
+    conn = DuckDB({"database": str(db_path)})
     try:
-        summary = load_spider2_lite(engine, spider2_lite_dir, overwrite=overwrite)
+        summary = load_spider2_lite(conn, spider2_lite_dir, overwrite=overwrite)
     finally:
-        engine.close()
+        conn.close()
 
     print(f"  Databases found : {summary['databases_found']}")
     print(f"  Loaded          : {summary['loaded']}")
