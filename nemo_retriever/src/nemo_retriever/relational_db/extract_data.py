@@ -89,7 +89,3 @@ def store_relational_db_in_neo4j(data, neo4j_conn=None):
         num_workers=4,
         dialect="duckdb",
     )
-
-
-if __name__ == "__main__":
-    main()
