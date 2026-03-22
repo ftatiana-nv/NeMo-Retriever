@@ -262,3 +262,8 @@ models/
 nemo_retriever/run_results/
 
 nemo_retriever/PIPELINE_FLOW.md
+
+# Batch-generated SQL (debug_retriever_sql --batch output)
+nemo_retriever/src/nemo_retriever/relational_db/generate_sql/generated_sql/
+
+nemo_retriever/src/nemo_retriever/relational_db/generate_sql/spider2-lite.jsonl
