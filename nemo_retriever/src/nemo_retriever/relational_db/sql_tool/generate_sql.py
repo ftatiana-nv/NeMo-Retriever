@@ -7,22 +7,15 @@ try:
 except ImportError:
     pass
 
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
-from sqlalchemy import create_engine, inspect
-from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
-from langchain_community.tools.sql_database.tool import QuerySQLDatabaseTool
-from langchain_community.utilities import SQLDatabase
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import json
+os.environ.setdefault("PYDEVD_WARN_EVALUATION_TIMEOUT", "60")
 
-_deep_agent = None
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
+import json
 
 
 def _make_llm() -> ChatNVIDIA:
     # Prefer LLM_API_KEY; fall back to NVIDIA_API_KEY (used by LangChain NVIDIA docs)
-    api_key = os.environ.get("LLM_API_KEY")
+    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
     return ChatNVIDIA(
         base_url=os.environ.get("LLM_INVOKE_URL"),
         api_key=api_key,
@@ -30,184 +23,72 @@ def _make_llm() -> ChatNVIDIA:
     )
 
 
-def _get_deep_agent(base_dir: str):
-    """
-    Create and cache the Deep Agent with all Snowflake schema tools.
-    This runs only once per process; subsequent calls reuse the same agent,
-    avoiding repeated schema discovery and tool construction for every question.
-    """
-    global _deep_agent
-    if _deep_agent is not None:
-        return _deep_agent
-
-    # Connect to DuckDB database
-    duckdb_path = os.environ.get("DUCKDB_PATH", "./spider2.duckdb")
-    engine = create_engine(f"duckdb:///{duckdb_path}")
-    inspector = inspect(engine)
-
-    # Get all schemas (excluding system schemas)
-    all_schemas = inspector.get_schema_names()
-    user_schemas = [s for s in all_schemas if s not in ["INFORMATION_SCHEMA"]]
-
-    # Step 2: Collect all tables from all schemas with fully qualified names
-    tables_by_schema = {}
-    all_table_count = 0
-    for schema in user_schemas:
-        try:
-            tables = inspector.get_table_names(schema=schema)
-            if tables:
-                tables_by_schema[schema] = tables
-                all_table_count += len(tables)
-        except Exception as e:
-            print(f"Warning: Could not access schema {schema}: {e}")
-
-    print(f"Discovered {all_table_count} tables across {len(user_schemas)} schemas")
-
-    # Step 3: Create multiple SQLDatabase instances (one per schema) in parallel
-    llm = _make_llm()
-    all_sql_tools = []
-
-    def process_schema(schema):
-        """Process a single schema and return its tools."""
-        try:
-            # DuckDB uses the shared engine; filter to the current schema
-            db_for_schema = SQLDatabase(
-                engine,
-                schema=schema,
-                sample_rows_in_table_info=3,
-                view_support=True,
-            )
-
-            # Create toolkit and get tools for this schema
-            toolkit = SQLDatabaseToolkit(db=db_for_schema, llm=llm)
-            schema_tools = toolkit.get_tools()
-
-            # Add schema prefix to tool names for clarity
-            for tool in schema_tools:
-                if hasattr(tool, "name"):
-                    tool.name = f"{schema}_{tool.name}"
-                if hasattr(tool, "description"):
-                    tool.description = f"[{schema} schema] {tool.description}"
-
-            print(f"Added tools for schema: {schema}")
-            return schema_tools
-
-        except Exception as e:
-            print(f"Warning: Could not create tools for schema {schema}: {e}")
-            return []
-
-    # Process all schemas in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(10, len(user_schemas))) as executor:
-        # Submit all schema processing tasks
-        future_to_schema = {executor.submit(process_schema, schema): schema for schema in user_schemas}
-        
-        # Collect results as they complete
-        for future in as_completed(future_to_schema):
-            schema_tools = future.result()
-            all_sql_tools.extend(schema_tools)
-
-    print(f"Total SQL tools created: {len(all_sql_tools)}")
-
-    # Add a global query execution tool on the full engine (no schema filter)
-    # so the agent can run cross-schema queries in addition to per-schema tools.
-    global_db = SQLDatabase(engine)
-    all_sql_tools.append(QuerySQLDatabaseTool(db=global_db))
-
-    # Step 4: Create the Deep Agent with all schema tools
-    # Only load the core operational skills (schema-exploration, query-writing).
-    # Final formatting is handled directly in query-writing (JSON {sql_code, answer, result}).
-    _deep_agent = create_deep_agent(
-        model=llm,
-        memory=["./AGENTS.md"],  # Agent identity and general instructions
-        skills=[
-            "./skills/schema-exploration",
-            "./skills/query-writing",
-        ],
-        tools=all_sql_tools,  # SQL database tools from all schemas
-        subagents=[],  # No subagents needed
-        backend=FilesystemBackend(root_dir=base_dir),  # Persistent file storage
-    )
-
-    return _deep_agent
+def _read_sql_string_literal(text: str, start: int) -> tuple[str, int] | None:
+    """Read a single-quoted SQL string from text starting at start (after the opening quote).
+    '' is treated as escaped quote. Returns (unescaped_content, index_after_closing_quote) or None."""
+    if start >= len(text) or text[start] != "'":
+        return None
+    i = start + 1
+    parts = []
+    while i < len(text):
+        if text[i] == "'":
+            if i + 1 < len(text) and text[i + 1] == "'":
+                parts.append("'")
+                i += 2
+                continue
+            return ("".join(parts), i + 1)
+        parts.append(text[i])
+        i += 1
+    return None
 
 
-
-
-def _parse_markdown_answer(text: str) -> dict | None:
-    """
-    Best-effort parser for markdown-style answers of the form:
-
-    ### Final Answer
-
-    **SQL Code Executed:**
-    ```sql
-    SELECT ...
-    ```
-
-    **Result:**
-    - ...
-
-    **Answer:**
-    some explanation...
-    """
-    sql_code = None
-    answer = None
-    result_value: object | None = None
-
-    # 1) Extract SQL between ```sql and next ```
-    start = text.find("```sql")
-    if start != -1:
-        start = text.find("\n", start)
-        if start != -1:
-            end = text.find("```", start)
-            if end != -1:
-                sql_code_block = text[start:end]
-                sql_code = sql_code_block.strip()
-
-    # 2) Extract answer text after "**Answer:**" (if present)
-    answer_marker = "**Answer:**"
-    idx = text.find(answer_marker)
-    if idx != -1:
-        answer = text[idx + len(answer_marker) :].strip()
-
-    # 3) Extract a numeric result from the "Result" section if present
-    #    We look between "**Result:**" and "**Answer:**" (or end of text)
-    result_marker = "**Result:**"
-    r_idx = text.find(result_marker)
-    if r_idx != -1:
-        r_start = r_idx + len(result_marker)
-        r_end = text.find("**Answer:**", r_start)
-        if r_end == -1:
-            r_end = len(text)
-        result_section = text[r_start:r_end]
-        # Try to find a number in the result section
-        import re
-
-        m = re.search(r"-?\d+(\.\d+)?", result_section)
-        if m:
-            num_str = m.group(0)
-            try:
-                result_value = float(num_str)
-            except ValueError:
-                result_value = num_str
+def _extract_json_from_sql_object(text: str) -> dict | None:
+    """Extract sql_code, answer, result from SQL JSON_OBJECT('sql_code', '...', 'answer', ..., 'result', '...')."""
+    import re
+    text = (text or "").strip()
+    # Find JSON_OBJECT( and then parse key-value pairs (allowing nested parens in values)
+    obj_start = re.search(r"JSON_OBJECT\s*\(", text, re.IGNORECASE)
+    if not obj_start:
+        return None
+    start = obj_start.end()
+    depth = 1
+    i = start
+    while i < len(text) and depth > 0:
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+        i += 1
+    if depth != 0:
+        return None
+    inner = text[start : i - 1]
+    out = {"sql_code": "", "answer": "", "result": None}
+    # Find 'sql_code', <value> and 'result', <value> (string literals); 'answer' can be expression
+    for key in ("sql_code", "answer", "result"):
+        key_pattern = re.escape(f"'{key}'") + r"\s*,\s*"
+        m = re.search(key_pattern, inner, re.IGNORECASE)
+        if not m:
+            continue
+        pos = m.end()
+        if pos < len(inner) and inner[pos] == "'":
+            lit = _read_sql_string_literal(inner, pos)
+            if lit:
+                out[key], _ = lit
         else:
-            # Fallback: keep the raw section as result if non-empty
-            if result_section.strip():
-                result_value = result_section.strip()
-
-    # If we at least have SQL and some answer text, return a dict
-    if sql_code and answer:
-        return {
-            "sql_code": sql_code,
-            "answer": answer,
-            "result": result_value,
-        }
-
+            # Non-string value (e.g. COUNT(...)); take until next 'sql_code', 'answer', 'result' or end
+            next_key = re.search(
+                r"'\s*(?:sql_code|answer|result)\s*'\s*,\s*", inner[pos:], re.IGNORECASE
+            )
+            end = pos + next_key.start() if next_key else len(inner)
+            out[key] = inner[pos:end].strip().rstrip(",").strip()
+    if out["sql_code"] or out["answer"] or out["result"] is not None:
+        return out
     return None
 
 
 def _extract_json_from_markdown(text: str) -> dict | None:
-    """Extract a JSON object from markdown content (e.g. inside ```json ... ``` or ``` ... ```)."""
+    """Extract a JSON object from markdown content (e.g. inside ```json ... ``` or ``` ... ```).
+    Also handles ```sql blocks where the content is SQL with JSON_OBJECT('sql_code', ..., 'answer', ..., 'result', ...)."""
     import re
     # 1) Try parsing the whole content as JSON
     text = (text or "").strip()
@@ -217,8 +98,8 @@ def _extract_json_from_markdown(text: str) -> dict | None:
             return obj
     except Exception:
         pass
-    # 2) Look for ```json ... ``` block
-    match = re.search(r"```(?:json)?\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
+    # 2) Look for ```json or ``` or ```sql ... ``` block
+    match = re.search(r"```(?:\w*)\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
     if match:
         block = match.group(1).strip()
         try:
@@ -227,6 +108,10 @@ def _extract_json_from_markdown(text: str) -> dict | None:
                 return obj
         except Exception:
             pass
+        # 2b) Block might be SQL containing JSON_OBJECT(...)
+        obj = _extract_json_from_sql_object(block)
+        if obj is not None:
+            return obj
     # 3) Look for any {...} that might be the JSON object (last occurrence, likely the intended one)
     brace = text.rfind("{")
     if brace != -1:
@@ -247,6 +132,49 @@ def _extract_json_from_markdown(text: str) -> dict | None:
                     return obj
             except Exception:
                 pass
+    # 4) No code block matched; try JSON_OBJECT anywhere in text (e.g. raw SQL response)
+    obj = _extract_json_from_sql_object(text)
+    if obj is not None:
+        return obj
+    return None
+
+
+def _parse_markdown_explanation_sql_thought(content: str) -> dict | None:
+    """Parse LLM output that uses **Explanation** / **Final Response**, **SQL Code** (```sql...```), **Thought**.
+    Used when the model returns markdown instead of JSON (e.g. OutputParserException)."""
+    import re
+    if not (content and isinstance(content, str)):
+        return None
+    text = content.strip()
+    sql_code = ""
+    explanation = ""
+    thought = ""
+
+    # Extract ```sql ... ``` block
+    sql_match = re.search(r"```\s*sql\s*\n([\s\S]*?)\n```", text, re.IGNORECASE)
+    if sql_match:
+        sql_code = sql_match.group(1).strip()
+
+    # Extract **Explanation** or **Final Response** ... (until **SQL Code** or **Thought** or end)
+    expl_match = re.search(
+        r"\*\*(?:Explanation|Final Response)\*\*\s*\n+([\s\S]*?)(?=\n\s*\*\*(?:SQL Code|Thought)\*\*|\Z)",
+        text,
+        re.IGNORECASE,
+    )
+    if expl_match:
+        explanation = expl_match.group(1).strip()
+
+    # Extract **Thought** ...
+    thought_match = re.search(r"\*\*Thought\*\*\s*\n+([\s\S]*)", text, re.IGNORECASE)
+    if thought_match:
+        thought = thought_match.group(1).strip()
+
+    if sql_code or explanation or thought:
+        return {
+            "sql_code": sql_code,
+            "answer": explanation or text[:500],
+            "result": thought or None,
+        }
     return None
 
 
@@ -274,151 +202,48 @@ def _parse_sql_response_content(content: str) -> dict | None:
     }
 
 
-def _save_answer_json(base_dir: str, answer: dict) -> None:
-    """
-    Persist the structured SQL answer to skills/answer-formatting/answer.json
-    for easier inspection/debugging.
-    """
-    try:
-        answer_path = os.path.join(
-            base_dir, "skills", "answer-formatting", "answer.json"
-        )
-        os.makedirs(os.path.dirname(answer_path), exist_ok=True)
-        with open(answer_path, "w", encoding="utf-8") as f:
-            json.dump(answer, f, ensure_ascii=False)
-    except Exception as e:  # noqa: PERF203
-        print(f"Warning: Could not save answer.json: {e}")
+# JSON schema for structured output (dict return; more reliable than Pydantic when parser returns None)
+CALC_FINAL_RESPONSE_JSON_SCHEMA = {
+    "title": "CalcFinalResponse",
+    "description": "Final SQL answer with explanation and thought",
+    "type": "object",
+    "properties": {
+        "response": {
+            "type": "string",
+            "description": "The final response with your explanations and the final sql query that answers the user's question.",
+        },
+        "sql_code": {
+            "type": "string",
+            "description": "The sql code that answers the user's question based on chosen snippet/s and appropriate joins (if present).",
+        },
+        "thought": {
+            "type": "string",
+            "description": "A short thought for your answer.",
+        },
+    },
+    "required": ["response", "sql_code", "thought"],
+}
 
 
-def _extract_structured_answer(result: dict) -> dict | None:
-    """
-    Scan all Deep Agent messages from the end and find the first one that
-    contains a JSON object with sql_code, answer, and result.
-
-    If no such JSON object is found, apply a best-effort heuristic parser
-    to markdown-style answers that include:
-    - a ```sql ... ``` code block, and
-    - a human-readable answer and/or result section.
-    """
-    messages = result.get("messages") or []
-    for msg in reversed(messages):
-        content = getattr(msg, "content", None)
-        # First, try strict JSON
-        if isinstance(content, str):
-            try:
-                obj = json.loads(content)
-            except Exception:
-                obj = None
-        elif isinstance(content, dict):
-            obj = content
-        else:
-            obj = None
-
-        if isinstance(obj, dict) and {
-            "sql_code",
-            "answer",
-            "result",
-        }.issubset(obj.keys()):
-            return obj
-
-        # If not JSON, try to heuristically parse markdown-style content
-        if isinstance(content, str):
-            heuristic = _parse_markdown_answer(content)
-            if heuristic is not None:
-                return heuristic
-
-    return None
-
-
-def _invoke_agent_with_prompt(agent, prompt: str, base_dir: str) -> dict:
-    """Invoke the Deep Agent with retries and structured answer extraction."""
-    max_retries = 3
-    last_error: Exception | None = None
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            result = agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]}
-            )
-
-            parsed = _extract_structured_answer(result)
-            if parsed is not None:
-                result_dict = {
-                    "sql_code": parsed.get("sql_code", ""),
-                    "answer": parsed.get("answer", ""),
-                    "result": parsed.get("result"),
-                }
-                _save_answer_json(base_dir, result_dict)
-                return result_dict
-
-            messages = result.get("messages") or []
-            final_message = messages[-1] if messages else None
-            raw_content = (
-                getattr(final_message, "content", None)
-                if final_message is not None
-                else None
-            )
-
-            answer_path = os.path.join(
-                base_dir, "skills", "answer-formatting", "answer.json"
-            )
-            if os.path.exists(answer_path):
-                try:
-                    with open(answer_path, "r", encoding="utf-8") as f:
-                        file_parsed = json.load(f)
-                    if (
-                        isinstance(file_parsed, dict)
-                        and "sql_code" in file_parsed
-                        and "answer" in file_parsed
-                        and "result" in file_parsed
-                    ):
-                        return {
-                            "sql_code": file_parsed.get("sql_code", ""),
-                            "answer": file_parsed.get("answer", ""),
-                            "result": file_parsed.get("result"),
-                        }
-                except Exception as file_err:  # noqa: PERF203
-                    print(
-                        f"Warning: Failed to read answer-formatting output file: {file_err}"
-                    )
-
-            if raw_content is not None:
-                return {
-                    "sql_code": "",
-                    "answer": raw_content,
-                    "result": None,
-                }
-        except Exception as e:  # noqa: PERF203
-            print(f"Error invoking agent (attempt {attempt}/{max_retries}): {e}")
-            last_error = e
-
+def _dict_to_sql_result(d: dict | None) -> dict:
+    """Map structured output dict (or Pydantic-like) to {sql_code, answer, result}."""
+    if not d or not isinstance(d, dict):
+        return {"sql_code": "", "answer": "", "result": None}
     return {
-        "sql_code": "",
-        "answer": f"Deep agent failed after {max_retries} attempts: {last_error}",
-        "result": None,
+        "sql_code": (d.get("sql_code") or "").strip() or " ",
+        "answer": (d.get("response") or d.get("answer") or "").strip() or " ",
+        "result": (d.get("thought") or d.get("result") or "").strip() or None,
     }
-
-
-def get_sql_tool_response(question: str):
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    agent = _get_deep_agent(base_dir)
-    prompt = (
-        "You are a SQL benchmark assistant.\n\n"
-        f"User question: {question}\n\n"
-    )
-    return _invoke_agent_with_prompt(agent, prompt, base_dir)
 
 
 def get_sql_tool_response_top_k(
     question: str,
     top_k: int = 15,
-):
-    """Like get_sql_tool_response, but first retrieves the top_k most relevant
-    tables from LanceDB and injects them into the prompt. Since the full schema
-    context is already in the prompt, no DB tools are needed — the LLM generates
-    SQL directly from the retrieved context.
+) -> dict:
+    """Retrieve top_k tables from LanceDB, then generate SQL via LLM (JSON schema + markdown fallbacks).
+
+    Returns a dict with keys: sql_code, answer, result.
     """
-    from langchain_core.messages import HumanMessage
     from nemo_retriever.retriever import Retriever
 
     retriever = Retriever(
@@ -439,20 +264,36 @@ def get_sql_tool_response_top_k(
         f"The following {len(table_context_lines)} most relevant tables were retrieved for this question:\n"
         f"{table_context}\n\n"
         f"User question: {question}\n\n"
-        "Use only the tables listed above when writing your SQL query. "
-        "Return a JSON object with keys: sql_code, answer, result."
+        "Use only the tables listed above when writing your SQL query.\n\n"
+        "You must respond with a single JSON object only (no markdown, no **Explanation** or **SQL Code** sections). "
+        "The JSON must have exactly these three keys:\n"
+        '- "response": string with your explanation and the final SQL in words\n'
+        '- "sql_code": string with the executable SQL query only\n'
+        '- "thought": string with a short thought about your answer\n'
+        'Example: {"response": "We use table X to...", "sql_code": "SELECT ... FROM x;", "thought": "The query joins..."}'
     )
 
     llm = _make_llm()
-    response = llm.invoke([HumanMessage(content=prompt)])
-    content = response.content if hasattr(response, "content") else str(response)
+    result_dict = None
 
-    parsed = _parse_sql_response_content(content)
-    if parsed is not None:
-        return parsed
+    # 1) Invoke with structured output. On parse failure, extract raw output from exception.
+    structured_llm = llm.with_structured_output(CALC_FINAL_RESPONSE_JSON_SCHEMA)
+    try:
+        result = structured_llm.invoke(prompt)
+        if isinstance(result, dict) and (result.get("sql_code") or result.get("response")):
+            result_dict = _dict_to_sql_result(result)
+    except Exception as e:
+        err_str = str(e)
+        if "Invalid json output:" in err_str:
+            content = err_str.split("Invalid json output:", 1)[-1].strip()
+            if "For troubleshooting" in content:
+                content = content.split("For troubleshooting")[0].strip()
+            result_dict = _parse_sql_response_content(content) or _parse_markdown_explanation_sql_thought(content)
+        if result_dict is None:
+            response = llm.invoke(prompt)
+            content = response.content if hasattr(response, "content") else str(response)
+            result_dict = _parse_sql_response_content(content) or _parse_markdown_explanation_sql_thought(content)
 
-    return {
-        "sql_code": "",
-        "answer": content,
-        "result": None,
-    }
+    if result_dict is None:
+        result_dict = _dict_to_sql_result(None)
+    return result_dict

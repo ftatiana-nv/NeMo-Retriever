@@ -1,7 +1,7 @@
 import sys
 import pendulum
 import pandas as pd
-from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
+from nemo_retriever.relational_db.connectors.duckdb import DuckDB
 from nemo_retriever.relational_db.population.graph.utils import (
     load_fks,
     load_pks,
@@ -11,7 +11,7 @@ from nemo_retriever.relational_db.population.graph.utils import (
 
 
 def create_dataframe(settings):
-    duckdb_connector = DuckDBEngine({"database": "./spider2.duckdb"})
+    duckdb_connector = DuckDB({"database": "./spider2.duckdb"})
 
     queries = duckdb_connector.get_queries()
 
@@ -89,7 +89,3 @@ def store_relational_db_in_neo4j(data, neo4j_conn=None):
         num_workers=4,
         dialect="duckdb",
     )
-
-
-if __name__ == "__main__":
-    main()
