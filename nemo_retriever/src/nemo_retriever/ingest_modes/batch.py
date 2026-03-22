@@ -45,8 +45,14 @@ from ..params import ExtractParams
 from ..params import HtmlChunkParams
 from ..params import IngestExecuteParams
 from ..params import PdfSplitParams
+from ..params import StructuredDescriptionParams
+from ..params import StructuredExtractParams
+from ..params import StructuredFetchParams
+from ..params import StructuredSemanticLayerParams
+from ..params import StructuredUsageWeightsParams
 from ..params import TextChunkParams
 from ..params import VdbUploadParams
+from ..relational_db.neo4j_connection import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +203,7 @@ class BatchIngestor(Ingestor):
         ray_address: Optional[str] = None,
         ray_log_to_driver: bool = True,
         debug: bool = False,
+        allow_no_gpu: bool = False,
     ) -> None:
         super().__init__(documents=documents)
 
@@ -238,7 +245,10 @@ class BatchIngestor(Ingestor):
         logger.info(self._cluster_resources)
 
         # 2. Resolve requested plan for the Ray DAG that will be built
-        self._requested_plan = resolve_requested_plan(cluster_resources=self._cluster_resources)
+        self._requested_plan = resolve_requested_plan(
+            cluster_resources=self._cluster_resources,
+            allow_no_gpu=allow_no_gpu,
+        )
         logger.info(self._requested_plan)
 
         # Builder-style task configuration recorded for later execution.
@@ -252,6 +262,9 @@ class BatchIngestor(Ingestor):
         self._extract_txt_kwargs: Dict[str, Any] = {}  # noqa: F821
         self._extract_html_kwargs: Dict[str, Any] = {}  # noqa: F821
         self._use_nemotron_parse_only: bool = False
+        # Stored params for the structured ingest path (no Ray Dataset needed).
+        self._structured_embed_params: Optional[EmbedParams] = None
+        self._structured_vdb_params: Optional[VdbUploadParams] = None
 
     def files(self, documents: Union[str, List[str]]) -> "BatchIngestor":
         """
@@ -705,14 +718,16 @@ class BatchIngestor(Ingestor):
         """
         if input_dataset is not None:
             self._rd_dataset = input_dataset
-        if self._rd_dataset is None:
-            raise RuntimeError(
-                "No Ray Dataset to embed. Provide input_dataset or run .files(...) / .extract(...) first."
-            )
 
         from nemo_retriever.params.utils import build_embed_kwargs
 
         resolved = _coerce_params(params, EmbedParams, kwargs)
+        # Always save params so ingest_structured can use them without a Ray Dataset.
+        self._structured_embed_params = resolved
+
+        if self._rd_dataset is None:
+            # Structured-only mode: no Ray Dataset to configure; params stored above.
+            return self
         kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
 
         # Remaining kwargs are forwarded to the actor constructor.
@@ -788,9 +803,16 @@ class BatchIngestor(Ingestor):
             if "purge_results_after_upload" in kwargs:
                 p = p.model_copy(update={"purge_results_after_upload": bool(kwargs["purge_results_after_upload"])})
         _ = p.purge_results_after_upload
+        # Always save params so ingest_structured can use them without a Ray Dataset.
+        self._structured_vdb_params = p
+
         vdb_kwargs = p.lancedb.model_dump(mode="python")
         self._tasks.append(("vdb_upload", dict(vdb_kwargs)))
         self._vdb_upload_kwargs = dict(vdb_kwargs)
+
+        if self._rd_dataset is None:
+            # Structured-only mode: no Ray Dataset to configure; params stored above.
+            return self
 
         # Streaming write stage — single actor, CPU-only, no GPU needed.
         self._rd_dataset = self._rd_dataset.map_batches(
@@ -1009,3 +1031,174 @@ class BatchIngestor(Ingestor):
             table.wait_for_index([index_stub.name], timeout=timedelta(seconds=600))
 
         print(f"Wrote {n_vecs} rows to LanceDB uri={lancedb_uri!r} table={table_name!r}")
+
+    # ------------------------------------------------------------------
+    # Structured (database) ingestion
+    # ------------------------------------------------------------------
+
+    def pull_structured_db_entities(
+        self,
+        params: StructuredExtractParams | None = None,
+    ) -> dict:
+        """Step 1 — Pull schema entities from the relational DB into a data dict."""
+        from ..relational_db.extract_data import extract_relational_db_data
+
+        return extract_relational_db_data(params=params)
+
+    def store_structured_in_neo4j(
+        self,
+        data: dict,
+        neo4j_conn: Any = None,
+    ) -> "BatchIngestor":
+        """Step 2 — Write the extracted data dict as graph nodes into Neo4j."""
+        from ..relational_db.extract_data import store_relational_db_in_neo4j
+
+        store_relational_db_in_neo4j(data=data, neo4j_conn=neo4j_conn)
+        return self
+
+    def populate_structured_semantic_layer(
+        self,
+        params: StructuredSemanticLayerParams | None = None,
+        neo4j_conn: Any = None,
+    ) -> "BatchIngestor":
+        """Step 3 — Map global business terms/attributes to graph entities."""
+        pass
+
+    def populate_structured_usage_weights(
+        self,
+        params: StructuredUsageWeightsParams | None = None,
+        neo4j_conn: Any = None,
+    ) -> "BatchIngestor":
+        """Step 4 — Derive usage weights from query log files."""
+        pass
+
+    def generate_structured_descriptions(
+        self,
+        params: StructuredDescriptionParams | None = None,
+        neo4j_conn: Any = None,
+    ) -> "BatchIngestor":
+        """Step 5 — LLM-generate natural-language descriptions for all node types."""
+        pass
+
+    def get_structured_metadata_for_embedding(
+        self,
+        params: StructuredFetchParams | None = None,
+        neo4j_conn: Any = None,
+    ) -> "rd.Dataset | None":
+        """Step 6 — Fetch entity descriptions from Neo4j and return a Ray Dataset.
+
+        Converts the result directly to a Ray Dataset (via rd.from_pandas) so
+        ingest_structured can feed it straight into the batch actor pipeline
+        without an intermediate pandas conversion step.
+
+        Columns: text, _embed_modality, path, page_number, metadata —
+        matching the unstructured pipeline row format.
+        """
+        from ..relational_db.prepare_for_embedding.prepare_embedding_text import (
+            fetch_relational_db_for_embedding,
+            neo4j_tables_result_to_embedding_dataframe,
+        )
+
+        docs = fetch_relational_db_for_embedding()
+        if not docs:
+            return None
+        df = neo4j_tables_result_to_embedding_dataframe(docs)
+        return rd.from_pandas(df)
+
+    def ingest_structured(
+        self,
+        params: StructuredExtractParams | None = None,
+    ) -> Any:
+        """Orchestrate the full structured ingestion pipeline.
+
+        Acquires the shared Neo4j connection once and passes it to every step.
+        After building the embedding DataFrame from Neo4j, converts it to a
+        Ray Dataset and runs the same batch actors used by the unstructured
+        pipeline (_BatchEmbedActor, _LanceDBWriteActor).
+
+        Steps:
+        1. pull_structured_db_entities         → pull schema entities from the DB
+        2. store_structured_in_neo4j           → write entities as graph nodes to Neo4j
+        3. populate_structured_semantic_layer
+        4. populate_structured_usage_weights
+        5. generate_structured_descriptions
+        6. get_structured_metadata_for_embedding → Ray Dataset
+        7. _BatchEmbedActor                    → GPU batch embedding (same as unstructured)
+        8. _LanceDBWriteActor                  → streaming upload to "nv-ingest-structured"
+        """
+        neo4j_conn = get_neo4j_conn()
+
+        data = self.pull_structured_db_entities(params=params)
+        self.store_structured_in_neo4j(data=data, neo4j_conn=neo4j_conn)
+
+        self.populate_structured_semantic_layer(neo4j_conn=neo4j_conn)
+        self.populate_structured_usage_weights(neo4j_conn=neo4j_conn)
+        self.generate_structured_descriptions(neo4j_conn=neo4j_conn)
+
+        rd_dataset = self.get_structured_metadata_for_embedding(neo4j_conn=neo4j_conn)
+
+        if rd_dataset is not None:
+            from nemo_retriever.params.utils import build_embed_kwargs
+
+            _STRUCTURED_TABLE = "nv-ingest-structured"
+
+            if self._structured_embed_params is not None:
+                resolved = self._structured_embed_params
+                embed_kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
+
+                rd_dataset = rd_dataset.repartition(
+                    target_num_rows_per_block=self._requested_plan.get_embed_batch_size()
+                )
+
+                endpoint = (
+                    embed_kwargs.get("embedding_endpoint") or embed_kwargs.get("embed_invoke_url") or ""
+                ).strip()
+                embed_actor_num_gpus = (
+                    0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
+                )
+
+                rd_dataset = rd_dataset.map_batches(
+                    _BatchEmbedActor,
+                    batch_size=self._requested_plan.get_embed_batch_size(),
+                    batch_format="pandas",
+                    num_gpus=embed_actor_num_gpus,
+                    compute=rd.ActorPoolStrategy(
+                        initial_size=self._requested_plan.get_embed_initial_actors(),
+                        min_size=self._requested_plan.get_embed_min_actors(),
+                        max_size=self._requested_plan.get_embed_max_actors(),
+                    ),
+                    fn_constructor_kwargs={"params": resolved},
+                )
+
+            if self._structured_vdb_params is not None:
+                structured_vdb_params = self._structured_vdb_params.model_copy(
+                    update={
+                        "lancedb": self._structured_vdb_params.lancedb.model_copy(
+                            update={"table_name": _STRUCTURED_TABLE}
+                        )
+                    }
+                )
+                rd_dataset = rd_dataset.map_batches(
+                    _LanceDBWriteActor,
+                    batch_format="pandas",
+                    num_cpus=1,
+                    compute=rd.ActorPoolStrategy(size=1),
+                    fn_constructor_kwargs={"params": structured_vdb_params},
+                )
+
+            # Materialise the lazy Ray Data pipeline.
+            result = rd_dataset.count()
+
+            # Create the vector index after all writes have finished.
+            if self._structured_vdb_params is not None:
+                saved_vdb_kwargs = getattr(self, "_vdb_upload_kwargs", None)
+                self._vdb_upload_kwargs = {
+                    **self._structured_vdb_params.lancedb.model_dump(mode="python"),
+                    "table_name": _STRUCTURED_TABLE,
+                }
+                self._create_lancedb_index()
+                if saved_vdb_kwargs is not None:
+                    self._vdb_upload_kwargs = saved_vdb_kwargs
+
+            return result
+        return None
