@@ -7,6 +7,9 @@ try:
 except ImportError:
     pass
 
+def generate_sql(query: str, top_k: int = 15) -> str:
+    """Generate a SQL query for a given natural language query."""
+    return get_sql_tool_response_top_k(query, top_k=top_k)
 
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import json
