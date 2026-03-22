@@ -47,20 +47,13 @@ except Exception as e:  # pragma: no cover
 
 from ..utils.convert import SUPPORTED_EXTENSIONS, convert_to_pdf_bytes
 from ..ingestor import Ingestor
-from ..relational_db.neo4j_connection import get_neo4j_conn
 from ..params import ASRParams
 from ..params import AudioChunkParams
 from ..params import EmbedParams
 from ..params.models import IMAGE_MODALITIES
 from ..params import ExtractParams
-from ..params import StructuredFetchParams
 from ..params import HtmlChunkParams
 from ..params import IngestExecuteParams
-from ..params import StructuredDescriptionParams
-from ..params import StructuredExtractParams
-
-from ..params import StructuredSemanticLayerParams
-from ..params import StructuredUsageWeightsParams
 from ..params import TextChunkParams
 from ..params import VdbUploadParams
 from ..pdf.extract import pdf_extraction
@@ -1701,114 +1694,3 @@ class InProcessIngestor(Ingestor):
             _print_ingest_summary(results, time.perf_counter() - _start)
         return results
 
-    # ------------------------------------------------------------------
-    # Structured (database) ingestion — placeholder implementations
-    # ------------------------------------------------------------------
-
-    def pull_structured_db_entities(
-        self,
-        params: StructuredExtractParams | None = None,
-    ) -> dict:
-        """Step 1 — Pull schema entities from the relational DB into a data dict."""
-        from ..relational_db.extract_data import extract_relational_db_data
-
-        return extract_relational_db_data(params=params)
-
-    def store_structured_in_neo4j(
-        self,
-        data: dict,
-        neo4j_conn: Any = None,
-    ) -> "InProcessIngestor":
-        """Step 2 — Write the extracted data dict as graph nodes into Neo4j."""
-        from ..relational_db.extract_data import store_relational_db_in_neo4j
-
-        store_relational_db_in_neo4j(data=data, neo4j_conn=neo4j_conn)
-        return self
-
-    def populate_structured_semantic_layer(
-        self,
-        params: StructuredSemanticLayerParams | None = None,
-        neo4j_conn: Any = None,
-    ) -> "InProcessIngestor":
-        """Step 2 — Map global business terms/attributes to graph entities."""
-        pass
-
-    def populate_structured_usage_weights(
-        self,
-        params: StructuredUsageWeightsParams | None = None,
-        neo4j_conn: Any = None,
-    ) -> "InProcessIngestor":
-        """Step 4 — Derive usage weights from query log files."""
-        pass
-
-    def generate_structured_descriptions(
-        self,
-        params: StructuredDescriptionParams | None = None,
-        neo4j_conn: Any = None,
-    ) -> "InProcessIngestor":
-        """Step 5 — LLM-generate natural-language descriptions for all node types."""
-        pass
-
-    def get_structured_metadata_for_embedding(
-        self,
-        params: StructuredFetchParams | None = None,
-        neo4j_conn: Any = None,
-    ) -> "pd.DataFrame | None":
-        """Step 6 — Fetch entity descriptions from Neo4j into a DataFrame.
-
-        Returns a DataFrame with columns: text, _embed_modality, path,
-        page_number, metadata — matching the unstructured pipeline format so
-        run_pipeline_tasks_on_df (embed + vdb_upload) works unchanged.
-        """
-        from ..relational_db.prepare_for_embedding.prepare_embedding_text import (
-            fetch_relational_db_for_embedding,
-            neo4j_tables_result_to_embedding_dataframe,
-        )
-
-        docs = fetch_relational_db_for_embedding()
-        if not docs:
-            return None
-        return neo4j_tables_result_to_embedding_dataframe(docs)
-
-    def ingest_structured(
-        self,
-        params: StructuredExtractParams | None = None,
-    ) -> Any:
-        """Orchestrate the full 8-step structured ingestion pipeline.
-
-        Acquires the shared Neo4j connection once via get_neo4j_conn() and
-        passes it to every step so no step creates its own connection.
-
-        Runs the following steps in order:
-        1. pull_structured_db_entities      → pull schema entities from the DB
-        2. store_structured_in_neo4j → write entities as graph nodes to Neo4j
-        2. populate_structured_semantic_layer
-
-        4. populate_structured_usage_weights
-        5. generate_structured_descriptions
-        6. get_structured_metadata_for_embedding  → DataFrame
-        7. embed             ← receives the DataFrame from step 6
-        8. vdb_upload        ← receives the embedded DataFrame from step 7 (table "nv-ingest-structured")
-        """
-        neo4j_conn = get_neo4j_conn()
-
-        data = self.pull_structured_db_entities(params=params)
-        self.store_structured_in_neo4j(data=data, neo4j_conn=neo4j_conn)
-
-        self.populate_structured_semantic_layer(neo4j_conn=neo4j_conn)
-        self.populate_structured_usage_weights(neo4j_conn=neo4j_conn)
-        self.generate_structured_descriptions(neo4j_conn=neo4j_conn)
-
-        df = self.get_structured_metadata_for_embedding(neo4j_conn=neo4j_conn)
-
-        if df is not None:
-            per_doc_tasks, post_tasks = self.get_pipeline_tasks()
-            # Pass structured table name to upload: structured path writes to "nv-ingest-structured".
-            _STRUCTURED_TABLE = "nv-ingest-structured"
-            post_tasks = [
-                (fn, {**kwargs, "table_name": _STRUCTURED_TABLE} if fn is upload_embeddings_to_lancedb_inprocess else kwargs)
-                for fn, kwargs in post_tasks
-            ]
-            result, _ = run_pipeline_tasks_on_df(df, per_doc_tasks, post_tasks)
-            return result
-        return None
