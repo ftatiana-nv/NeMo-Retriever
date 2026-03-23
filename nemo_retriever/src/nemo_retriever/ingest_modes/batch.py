@@ -893,7 +893,6 @@ class BatchIngestor(Ingestor):
         if any((resolved.embedding_endpoint, resolved.embed_invoke_url)) and not resolved.api_key:
             resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
 
-
         kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
         embed_batch_size = (
             self._positive_int(kwargs.get("embed_batch_size")) or self._requested_plan.get_embed_batch_size()
@@ -1364,9 +1363,7 @@ class BatchIngestor(Ingestor):
                 endpoint = (
                     embed_kwargs.get("embedding_endpoint") or embed_kwargs.get("embed_invoke_url") or ""
                 ).strip()
-                embed_actor_num_gpus = (
-                    0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
-                )
+                embed_actor_num_gpus = 0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
 
                 rd_dataset = rd_dataset.map_batches(
                     _BatchEmbedActor,

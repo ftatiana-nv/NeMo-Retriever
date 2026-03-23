@@ -221,7 +221,7 @@ class EmbedParams(_ParamsModel):
     model_name: Optional[str] = None
     embedding_endpoint: Optional[str] = None
     embed_invoke_url: Optional[str] = None
-    api_key: Optional[str] = None #.g. NVIDIA API key for inference-api.nvidia.com
+    api_key: Optional[str] = None  # e.g. NVIDIA API key for inference-api.nvidia.com
     input_type: str = "passage"
     embed_modality: str = "text"  # "text", "image", or "text_image" — default for all element types
     embed_granularity: Literal["element", "page"] = "element"  # "element" = per-element rows, "page" = one row per page
