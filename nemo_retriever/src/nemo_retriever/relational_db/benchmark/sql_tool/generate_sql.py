@@ -1,26 +1,187 @@
 import os
+from pathlib import Path
 
-# Load .env from current working directory so LLM_API_KEY, LLM_INVOKE_URL are set (run from repo root)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+# Load .env: prefer repo-root .env even when cwd is wrong (IDE/debugger often uses another cwd).
+def _load_dotenv_for_llm() -> None:
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    # Default True: a prior cwd-only ``load_dotenv()`` may have set empty ``LLM_*`` keys;
+    # without override, the real repo ``.env`` cannot fix them. Set ``LLM_DOTENV_OVERRIDE=0``
+    # to keep existing process env (e.g. exported secrets in CI).
+    _ov = os.environ.get("LLM_DOTENV_OVERRIDE", "1").strip().lower() not in ("0", "false", "no")
+    # Explicit path wins (e.g. debugger / monorepo): export DOTENV_PATH=/path/to/.env
+    explicit = (os.environ.get("DOTENV_PATH") or os.environ.get("NEMO_RETRIEVER_DOTENV") or "").strip()
+    if explicit:
+        p = Path(explicit).expanduser()
+        if p.is_file():
+            load_dotenv(p, override=_ov)
+            return
+    here = Path(__file__).resolve()
+    for parent in [here.parent, *here.parents]:
+        env = parent / ".env"
+        if env.is_file():
+            load_dotenv(env, override=_ov)
+            return
+    load_dotenv(override=_ov)
+
+
+_load_dotenv_for_llm()
 
 os.environ.setdefault("PYDEVD_WARN_EVALUATION_TIMEOUT", "60")
 
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import json
 
+# Default when LLM_MODEL is unset: must exist on https://integrate.api.nvidia.com (see NVIDIA NIM catalog).
+# The old default ``nvidia/nvidia/Nemotron-3-Nano-30B-A3B`` often 404s or is unavailable for hosted keys.
+_DEFAULT_LLM_MODEL = "meta/llama-3.1-8b-instruct"
+
+
+def _normalize_nvidia_base_url(url: str | None) -> str | None:
+    """Ensure hosted NIM base URLs are ``.../v1`` (not ``.../v1/chat/completions`` — that breaks infer URL)."""
+    if url is None or not str(url).strip():
+        return None
+    u = str(url).strip().rstrip("/")
+    # User pasted full inference URL; strip to OpenAI-style base only.
+    for suffix in ("/chat/completions", "/completions"):
+        if u.endswith(suffix):
+            u = u[: -len(suffix)].rstrip("/")
+    for host in ("integrate.api.nvidia.com", "ai.api.nvidia.com"):
+        if host in u and not u.endswith("/v1"):
+            return f"{u}/v1"
+    return u
+
+
+def _chat_nvidia_will_hit_integrate_hosted() -> bool:
+    """True when ``ChatNVIDIA`` will use NVIDIA cloud (needs ``LLM_API_KEY`` / ``NVIDIA_API_KEY``).
+
+    ``base_url=None`` defaults to ``integrate.api.nvidia.com`` unless ``NVIDIA_BASE_URL`` overrides.
+    """
+    b = _normalize_nvidia_base_url(os.environ.get("LLM_INVOKE_URL"))
+    if b is not None:
+        return any(h in b for h in ("integrate.api.nvidia.com", "ai.api.nvidia.com"))
+    nb = (os.environ.get("NVIDIA_BASE_URL") or "").strip()
+    if nb and ("localhost" in nb or "127.0.0.1" in nb):
+        return False
+    if nb and any(h in nb for h in ("integrate.api.nvidia.com", "ai.api.nvidia.com")):
+        return True
+    # No explicit base: library default is integrate hosted
+    return True
+
+
+def _validate_nvidia_model_for_api_key(llm: ChatNVIDIA) -> None:
+    """If ``LLM_VALIDATE_MODEL=1``, ensure ``llm.model`` is in ``get_available_models()`` for this key.
+
+    Catches misconfigured ``LLM_MODEL`` before long Deep Agent runs. The hosted API often
+    returns ``[404] Function '…' Not found for account`` when the model id is wrong for the key.
+    """
+    if os.environ.get("LLM_VALIDATE_MODEL", "0").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return
+    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+    if not api_key:
+        return
+    try:
+        client = getattr(llm, "_client", None)
+        if client is None or not getattr(client, "is_hosted", False):
+            return
+    except Exception:
+        return
+    mid = getattr(llm, "model", None) or ""
+    if not mid:
+        return
+    base_url = _normalize_nvidia_base_url(os.environ.get("LLM_INVOKE_URL"))
+    try:
+        available = ChatNVIDIA.get_available_models(api_key=api_key, base_url=base_url)
+        ids = {m.id for m in available}
+    except Exception as e:
+        print(f"Warning: LLM_VALIDATE_MODEL: could not list models: {e}")
+        return
+    if mid not in ids:
+        sample = sorted(ids)[:15]
+        raise ValueError(
+            f"LLM_MODEL={mid!r} is not in the models your API key can call "
+            f"(this causes NVIDIA [404] Function not found for account).\n"
+            f"Run: python scripts/list_nvidia_models.py\n"
+            f"Then set LLM_MODEL to one of those ids, e.g. {sample}\n"
+            "Unset LLM_VALIDATE_MODEL or set LLM_SKIP_MODEL_VALIDATION=1 is not used here — "
+            "remove LLM_VALIDATE_MODEL to skip this check."
+        )
+
+
+def _patch_hosted_nvidia_tool_support(llm: ChatNVIDIA) -> None:
+    """LangChain marks unknown model ids as ``supports_tools=False``; hosted NIM chat models usually support tools."""
+    if os.environ.get("DEEP_AGENT_TRUST_NVIDIA_TOOL_SUPPORT", "1").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    ):
+        return
+    try:
+        client = getattr(llm, "_client", None)
+        if client is None or not getattr(client, "is_hosted", False):
+            return
+        m = getattr(client, "model", None)
+        if m is None or getattr(m, "supports_tools", False):
+            return
+        client.model = m.model_copy(update={"supports_tools": True})
+    except Exception:
+        pass
+
 
 def _make_llm() -> ChatNVIDIA:
     # Prefer LLM_API_KEY; fall back to NVIDIA_API_KEY (used by LangChain NVIDIA docs)
-    api_key = os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
-    return ChatNVIDIA(
-        base_url=os.environ.get("LLM_INVOKE_URL"),
+    api_key = (os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY") or "").strip() or None
+    base = _normalize_nvidia_base_url(os.environ.get("LLM_INVOKE_URL"))
+    # Missing LLM_INVOKE_URL used to skip the guard (``base`` was None) while ChatNVIDIA still defaulted
+    # to integrate — every model then returned plain-text 404 (no Authorization header).
+    if _chat_nvidia_will_hit_integrate_hosted() and not api_key:
+        raise ValueError(
+            "NVIDIA chat returned [404] Not Found with body '404 page not found' when the request has "
+            "no Authorization header.\n"
+            "Set LLM_API_KEY (or NVIDIA_API_KEY) in .env at the repo root, or export it in your shell.\n"
+            "If you use the VS Code debugger, ensure .env is loaded — this module now searches upward from "
+            "the package for a .env file.\n"
+            "Quick check:  curl -sS -o /dev/null -w '%{http_code}\\n' -X POST "
+            "https://integrate.api.nvidia.com/v1/chat/completions -H 'Content-Type: application/json' -d '{}'  "
+            "→ 404 without Bearer; 401 with a dummy Bearer."
+        )
+    # Long SQL + tool-call JSON must not be truncated mid-string (DuckDB then reports
+    # "syntax error at end of input"). Use max_completion_tokens (ChatNVIDIA preferred name).
+    # Default 8192 gives headroom for Deep Agent + skills + long CTEs (raise via env if needed).
+    _mt = os.environ.get("DEEP_AGENT_MAX_TOKENS") or os.environ.get("LLM_MAX_TOKENS")
+    max_completion_tokens = 8192
+    if _mt:
+        try:
+            max_completion_tokens = int(_mt)
+        except ValueError:
+            pass
+    model_kwargs: dict = {}
+    _mk = os.environ.get("LLM_MODEL_KWARGS_JSON", "").strip()
+    if _mk:
+        try:
+            parsed = json.loads(_mk)
+            if isinstance(parsed, dict):
+                model_kwargs = parsed
+        except json.JSONDecodeError:
+            pass
+    llm = ChatNVIDIA(
+        base_url=base,
         api_key=api_key,
-        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
+        model=os.environ.get("LLM_MODEL", _DEFAULT_LLM_MODEL),
+        max_completion_tokens=max_completion_tokens,
+        model_kwargs=model_kwargs,
     )
+    _patch_hosted_nvidia_tool_support(llm)
+    _validate_nvidia_model_for_api_key(llm)
+    return llm
 
 
 def _read_sql_string_literal(text: str, start: int) -> tuple[str, int] | None:

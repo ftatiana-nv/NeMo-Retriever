@@ -19,7 +19,7 @@ Use this skill when you need to:
 ### 1. List All Tables
 Use `sql_db_list_tables` tool to see all available tables in the database.
 
-This returns the complete list of tables you can query.
+This returns the complete list of tables you can query. When multiple DuckDB schemas are exposed, names may look like `schema__/__table`; use the **qualified** `CREATE TABLE "schema"."table"` form from `sql_db_schema` when writing SQL.
 
 ### 2. Get Schema for Specific Tables
 Use `sql_db_schema` tool with table names to examine:
