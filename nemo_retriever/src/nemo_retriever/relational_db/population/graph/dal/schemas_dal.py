@@ -74,31 +74,31 @@ def get_schema_columns(db_name, schema_name, include_deleted: bool = False):
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{RelTypes.CONTAINS}]->
                 (t:{Labels.TABLE})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
                 {deleted_filter}
-                WITH d.name as database
-                s.name as schema
+                WITH d.name as database,
+                s.name as schema,
                 t.name as table_name,
-                c.name as column_name
-                c.id as c_id
-                c.data_type as data_type
+                c.name as column_name,
+                c.id as c_id,
+                c.data_type as data_type,
                 c.ordinal_position as ordinal_position,
-                c.is_nullable as is_nullable
-                c.default as default
-                c.length as length
-                c.description as comment
+                c.is_nullable as is_nullable,
+                c.default as default,
+                c.length as length,
+                c.description as comment,
                 c.scale as scale
                 RETURN collect({{
-                    database:database
-                    schema:schema
-                    table_name:table_name
-                    column_name:column_name
-                    id:c_id
-                    data_type:data_type,
-                    ordinal_position: ordinal_position
-                    is_nullable:is_nullable
-                    default:default
-                    length:length
-                    comment:comment,
-                    scale:scale
+                    database: database,
+                    schema: schema,
+                    table_name: table_name,
+                    column_name: column_name,
+                    id: c_id,
+                    data_type: data_type,
+                    ordinal_position: ordinal_position,
+                    is_nullable: is_nullable,
+                    default: default,
+                    length: length,
+                    comment: comment,
+                    scale: scale
                 }}) as columns
                 """
     res = conn.query_read(

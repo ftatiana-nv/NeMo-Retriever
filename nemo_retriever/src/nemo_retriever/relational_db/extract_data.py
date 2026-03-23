@@ -34,7 +34,7 @@ def create_dataframe(settings):
 
 def data_for_populate_structured(settings):
     """Build the `data` dict expected by populate_structured_data from create_dataframe output."""
-    tables, columns, views, pks, fks = create_dataframe(settings)
+    tables, columns, views, queries, pks, fks = create_dataframe(settings)
     tables = load_tables(tables)
     columns = load_columns(columns)
     pks = load_pks(pks)
