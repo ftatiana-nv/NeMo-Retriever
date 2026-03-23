@@ -4,10 +4,7 @@ import json
 import math
 import os
 import re
-import shutil
 import sys
-import tempfile
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
@@ -236,17 +233,33 @@ def score_sql_code(question: str, sql_response: dict, ground_truth_sql: str):
     ]
 
     try:
-        response = _make_llm().with_structured_output(SqlScoringResponse).invoke(messages)
-        scoring_result = dict()
-        scoring_result["logic_match"] = response.logic_match
-        scoring_result["logic_issues"] = response.logic_issues
-        scoring_result["semantic_match"] = response.semantic_match
-        scoring_result["final_weighted_score"] = response.final_weighted_score
-        scoring_result["sql_compared_to_ground_truth_score"] = (
-            response.sql_compared_to_ground_truth_score
-        )
-        scoring_result["is_valid_sql"] = response.is_valid_sql
-        return scoring_result
+        from langchain_core.messages import HumanMessage
+        # Append explicit JSON instruction so the model returns parseable output
+        json_messages = messages + [
+            HumanMessage(content=(
+                "Respond ONLY with a valid JSON object matching this schema — no markdown, no explanation:\n"
+                '{"logic_match": <float 0-1>, "logic_issues": "<string>", '
+                '"semantic_match": <float 0-1>, "final_weighted_score": <float 0-1>, '
+                '"sql_compared_to_ground_truth_score": <float 0-1>, "is_valid_sql": <true|false>}'
+            ))
+        ]
+        raw_response = _make_llm().invoke(json_messages)
+        raw_text = raw_response.content
+        print(f"[LLM scoring] raw response: {raw_text[:500]}")
+
+        # Strip markdown code fences if present
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.DOTALL).strip()
+        data = json.loads(cleaned)
+        response = SqlScoringResponse(**data)
+
+        return {
+            "logic_match": response.logic_match,
+            "logic_issues": response.logic_issues,
+            "semantic_match": response.semantic_match,
+            "final_weighted_score": response.final_weighted_score,
+            "sql_compared_to_ground_truth_score": response.sql_compared_to_ground_truth_score,
+            "is_valid_sql": response.is_valid_sql,
+        }
 
     except Exception as e:
         # Fallback scoring in case of LLM failure
@@ -538,7 +551,7 @@ def compare_pandas_table(pred: pd.DataFrame, gold: pd.DataFrame, condition_cols=
 
 
 def get_duckdb_result(db_path: str, query: str, save_dir=None, file_name: str = "result.csv", chunksize: int = 500, instance_id: str = None, schema: str = None):
-    from nemo_retriever.relational_db.db_setup.duckdb_engine import DuckDBEngine
+    from nemo_retriever.relational_db.connectors.duckdb_engine import DuckDBEngine
 
     prefix = f"[{instance_id}] " if instance_id else ""
 
@@ -773,7 +786,7 @@ def evaluate_spider2sql(args):
         )
     spider2sql_metadata = load_jsonl_to_dict(str(metadata_file))
 
-    from nemo_retriever.relational_db.db_setup.setup_spider2 import DEFAULT_DB_PATH
+    from nemo_retriever.relational_db.connectors.setup_spider2 import DEFAULT_DB_PATH
 
     if getattr(args, "db_path", None):
         consolidated_db_path = Path(args.db_path).expanduser().resolve()
@@ -795,7 +808,7 @@ def evaluate_spider2sql(args):
         pred_ids = [Path(file).stem for file in os.listdir(pred_result_dir) if file.endswith(".csv")]
 
     gold_ids = list(eval_standard_dict.keys())
-    eval_ids = sorted(set(gold_ids).intersection(pred_ids))[:10]
+    eval_ids = sorted(set(gold_ids).intersection(pred_ids))
 
     if not eval_ids:
         print("No overlapping prediction IDs with gold set. Nothing to evaluate.")
@@ -869,8 +882,32 @@ def evaluate_spider2sql(args):
 
     print({item["instance_id"]: item["score"] for item in output_results})
     correct_examples = sum(item["score"] for item in output_results)
+    total = len(output_results)
 
-    print(f"Final score: {correct_examples / len(output_results)}, Correct examples: {correct_examples}, Total examples: {len(output_results)}")
+    def _avg(key):
+        vals = [item[key] for item in output_results if item.get(key) is not None]
+        return (sum(vals) / len(vals), len(vals)) if vals else (None, 0)
+
+    avg_weighted, n_weighted       = _avg("llm_final_weighted_score")
+    avg_gt,       n_gt             = _avg("llm_ground_truth_score")
+    avg_logic,    n_logic          = _avg("llm_logic_match")
+    avg_semantic, n_semantic       = _avg("llm_semantic_match")
+
+    def _fmt(avg, n): return f"{avg:.4f}  (n={n})" if avg is not None else "n/a"
+
+    print("\n" + "=" * 60)
+    print("EVALUATION SUMMARY")
+    print("=" * 60)
+    print(f"Total evaluated              : {total}")
+    print(f"Exact match (score=1)        : {correct_examples}  ({correct_examples / total:.1%})")
+    print(f"Exact match / 547            : {correct_examples / 547:.1%}")
+    print(f"LLM avg logic match          : {_fmt(avg_logic, n_logic)}")
+    print(f"LLM avg semantic match       : {_fmt(avg_semantic, n_semantic)}")
+    print(f"LLM avg final weighted score : {_fmt(avg_weighted, n_weighted)}")
+    print(f"LLM avg ground truth sim     : {_fmt(avg_gt, n_gt)}")
+    print("=" * 60)
+
+    print(f"\nFinal score: {correct_examples / total}, Correct examples: {correct_examples}, Total examples: {total}")
     print(f"Real score: {correct_examples / 547}, Correct examples: {correct_examples}, Total examples: 547")
 
     save_correct_ids_to_csv(output_results, pred_result_dir)
