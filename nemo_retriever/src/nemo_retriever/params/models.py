@@ -340,7 +340,7 @@ class TabularExtractParams(_ParamsModel):
     pre-existing SQL DDL/query files.  Produces Database, Schema, Table,
     Column, View and Query nodes together with their relationships.
     The Neo4j connection is provided by get_neo4j_conn() (see
-    relational_db.neo4j_connection) and is not configured here.
+    tabular_data.neo4j) and is not configured here.
     """
 
     db_connection_string: Optional[str] = None
