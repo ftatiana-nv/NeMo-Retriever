@@ -869,9 +869,8 @@ class BatchIngestor(Ingestor):
             # Structured-only mode: no Ray Dataset to configure; params stored above.
             return self
 
-        if any((resolved.embedding_endpoint, resolved.embed_invoke_url)) and not resolved.embedding_api_key:
-            resolved = resolved.model_copy(update={"embedding_api_key": resolve_remote_api_key()})
-
+        if any((resolved.embedding_endpoint, resolved.embed_invoke_url)) and not resolved.api_key:
+            resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
 
         kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
 
@@ -1298,9 +1297,7 @@ class BatchIngestor(Ingestor):
                 endpoint = (
                     embed_kwargs.get("embedding_endpoint") or embed_kwargs.get("embed_invoke_url") or ""
                 ).strip()
-                embed_actor_num_gpus = (
-                    0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
-                )
+                embed_actor_num_gpus = 0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
 
                 rd_dataset = rd_dataset.map_batches(
                     _BatchEmbedActor,
