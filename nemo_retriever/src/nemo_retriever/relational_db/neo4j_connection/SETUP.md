@@ -147,4 +147,3 @@ docker run \
   -e NEO4J_dbms_security_procedures_unrestricted='apoc.*' \
   -e NEO4J_dbms_security_procedures_allowlist='apoc.*' \
   neo4j:5.26
-
