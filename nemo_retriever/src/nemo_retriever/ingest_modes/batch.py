@@ -54,7 +54,7 @@ from ..params import TabularSemanticLayerParams
 from ..params import TabularUsageWeightsParams
 from ..params import TextChunkParams
 from ..params import VdbUploadParams
-from ..relational_db.neo4j_connection import get_neo4j_conn
+from ..tabular_data.neo4j import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
@@ -1208,7 +1208,7 @@ class BatchIngestor(Ingestor):
         params: TabularExtractParams | None = None,
     ) -> dict:
         """Step 1 — Pull schema entities from the relational DB into a data dict."""
-        from ..relational_db.extract_data import extract_relational_db_data
+        from ..tabular_data.ingestion.extract_data import extract_relational_db_data
 
         return extract_relational_db_data(params=params)
 
@@ -1218,7 +1218,7 @@ class BatchIngestor(Ingestor):
         neo4j_conn: Any = None,
     ) -> "BatchIngestor":
         """Step 2 — Write the extracted data dict as graph nodes into Neo4j."""
-        from ..relational_db.extract_data import store_relational_db_in_neo4j
+        from ..tabular_data.ingestion.extract_data import store_relational_db_in_neo4j
 
         store_relational_db_in_neo4j(data=data, neo4j_conn=neo4j_conn)
         return self
@@ -1261,7 +1261,7 @@ class BatchIngestor(Ingestor):
         Columns: text, _embed_modality, path, page_number, metadata —
         matching the unstructured pipeline row format.
         """
-        from ..relational_db.prepare_for_embedding.prepare_embedding_text import (
+        from ..tabular_data.ingestion.prepare_for_embedding.prepare_embedding_text import (
             fetch_relational_db_for_embedding,
             neo4j_tables_result_to_embedding_dataframe,
         )
