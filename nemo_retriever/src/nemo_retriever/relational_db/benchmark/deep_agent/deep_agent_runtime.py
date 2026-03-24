@@ -601,89 +601,23 @@ def _get_sql_agent(
     return agent
 
 
-def _clear_stale_answer_json(base_dir: str) -> None:
-    """Remove ``skills/answer-formatting/answer.json`` before a new question.
+def _answer_artifact_path(base_dir: str, question: str, attempt: int) -> str:
+    """Return per-question answer artifact path under ``generated_answers/deep_agent``."""
+    # Keep a short, stable filename prefix from the beginning of the question.
+    q = (question or "").strip().lower()
+    prefix = re.sub(r"[^a-z0-9]+", "_", q).strip("_")
+    prefix = (prefix[:24] or "question")
+    filename = f"{prefix}_attempt_{attempt:02d}.json"
+    return os.path.join(base_dir, "generated_answers", "deep_agent", filename)
 
-    The fallback in ``get_deep_agent_sql_response`` reads this file when message parsing
-    fails; if left from a prior run, two different questions can incorrectly get the same
-    ``sql_code``.
+
+def _save_answer_json(base_dir: str, question: str, attempt: int, answer: dict) -> None:
     """
-    answer_path = os.path.join(
-        base_dir, "skills", "answer-formatting", "answer.json"
-    )
-    try:
-        if os.path.isfile(answer_path):
-            os.remove(answer_path)
-    except OSError:
-        pass
-
-
-def _warn_if_token_budget_exceeded(result: dict) -> None:
-    """Explain ``~40 completion_tokens`` + truncated ``sql_db_query`` when prompt exceeds context.
-
-    Opt-in only: set ``DEEP_AGENT_PRINT_TOKEN_STATS=1`` to print token usage / overflow hints.
-
-    Many hosted ``meta/llama-3.1-*`` models use an **8192** total context window on NVIDIA
-    Integrate. If ``prompt_tokens`` is ~9k, the prompt alone exceeds that window; the API
-    still returns usage, but **completion** is squeezed to ~tens of tokens — SQL stops
-    mid-clause (e.g. after ``BETWEEN ``). This is not fixed by raising ``max_completion_tokens``
-    if there is no room left after counting input tokens.
-
-    Set env ``DEEP_AGENT_ASSUMED_CONTEXT_TOKENS`` if your model has a different window
-    (e.g. 131072 for long-context builds).
-    """
-    if os.environ.get("DEEP_AGENT_PRINT_TOKEN_STATS", "").strip().lower() not in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    ):
-        return
-    try:
-        assumed = int(os.environ.get("DEEP_AGENT_ASSUMED_CONTEXT_TOKENS", "8192"))
-    except ValueError:
-        assumed = 8192
-    messages = result.get("messages") or []
-    for msg in reversed(messages):
-        meta = getattr(msg, "response_metadata", None) or {}
-        usage = meta.get("token_usage") or {}
-        pt = usage.get("prompt_tokens")
-        ct = usage.get("completion_tokens")
-        if pt is None:
-            um = getattr(msg, "usage_metadata", None) or {}
-            pt = um.get("input_tokens")
-            ct = um.get("output_tokens")
-        if pt is None:
-            continue
-        over = int(pt) - assumed
-        if int(pt) > assumed:
-            print(
-                "\n=== Deep Agent: context overflow risk (token math) ===\n"
-                f"  prompt_tokens (this step): {pt}\n"
-                f"  assumed context window:    {assumed}  (set DEEP_AGENT_ASSUMED_CONTEXT_TOKENS if wrong)\n"
-                f"  over budget by:            ~{over} tokens (prompt alone > window)\n"
-                f"  completion_tokens:         {ct!r}  ← often ~30–50 when squeezed; SQL truncates.\n"
-                "  Raising DEEP_AGENT_MAX_TOKENS does not add *input* room. Use a long-context LLM_MODEL,\n"
-                "  or DEEP_AGENT_LOAD_SKILLS=0, or a shorter AGENTS.md.\n"
-                "========================================================\n"
-            )
-        elif ct is not None and int(ct) <= 96 and int(pt) >= assumed - 400:
-            print(
-                f"WARNING: completion_tokens={ct} with prompt_tokens={pt} — tight budget; "
-                f"truncated tool SQL is likely if the model context is ~{assumed}."
-            )
-        return
-
-
-def _save_answer_json(base_dir: str, answer: dict) -> None:
-    """
-    Persist the structured SQL answer to skills/answer-formatting/answer.json
+    Persist the structured SQL answer to ``generated_answers/deep_agent/<question>_attempt_XX.json``
     for easier inspection/debugging.
     """
     try:
-        answer_path = os.path.join(
-            base_dir, "skills", "answer-formatting", "answer.json"
-        )
+        answer_path = _answer_artifact_path(base_dir, question, attempt)
         os.makedirs(os.path.dirname(answer_path), exist_ok=True)
         with open(answer_path, "w", encoding="utf-8") as f:
             json.dump(answer, f, ensure_ascii=False)

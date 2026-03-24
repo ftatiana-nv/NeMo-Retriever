@@ -101,12 +101,18 @@ def run_single(
         payload = {"question": question, "user_id": None}
         if db is not None:
             payload["db"] = db
-        r = get_deep_agent_sql_response("debug", payload)
-        return (r.get("sql_code") or "").strip() or ""
+        response = get_deep_agent_sql_response("debug", payload)
+        return (response.get("sql_code") or "").strip() or ""
 
-    from nemo_retriever.relational_db.benchmark.deep_agent import generate_sql
+    elif mode == "sql-tool":
+        from nemo_retriever.relational_db.benchmark.sql_tool.generate_sql import (
+            get_sql_tool_response_top_k,
+        )
 
-    return generate_sql(question, top_k=top_k)
+        result = get_sql_tool_response_top_k(question, top_k=top_k)
+        return (result.get("sql_code") or "").strip() or ""
+
+    raise ValueError(f"Unsupported mode: {mode!r}. Use 'sql-tool' or 'deep-agent'.")
 
 
 def run_batch(
@@ -185,9 +191,12 @@ def run_batch(
                     question, top_k=top_k, mode="deep-agent", db=db_id
                 )
             else:
-                from nemo_retriever.relational_db.benchmark.deep_agent import generate_sql
+                from nemo_retriever.relational_db.benchmark.sql_tool.generate_sql import (
+                    get_sql_tool_response_top_k,
+                )
 
-                sql_code = generate_sql(question, top_k=top_k)
+                result = get_sql_tool_response_top_k(question, top_k=top_k)
+                sql_code = (result.get("sql_code") or "").strip() or ""
             filename = _safe_filename(instance_id) + ".sql"
             out_path = output_dir / filename
             out_path.write_text(sql_code, encoding="utf-8")

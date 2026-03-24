@@ -10,7 +10,6 @@ DuckDB agent construction and answer parsing live in ``deep_agent_runtime.py``.
 
 from __future__ import annotations
 
-import json
 import os
 
 from nemo_retriever.relational_db.benchmark.deep_agent.prompts import (
@@ -82,14 +81,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
 
     for attempt in range(1, max_retries + 1):
         try:
-            # Avoid reusing answer.json from a previous question (see _clear_stale_answer_json).
-            rt._clear_stale_answer_json(base_dir)
-
             result = agent.invoke(
                 {"messages": [{"role": "user", "content": prompt}]}
             )
-            rt._warn_if_token_budget_exceeded(result)
-
             parsed = rt._extract_structured_answer(result)
             if parsed is not None:
                 result_dict = {
@@ -97,7 +91,7 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                     "answer": parsed.get("answer", ""),
                     "result": parsed.get("result"),
                 }
-                rt._save_answer_json(base_dir, result_dict)
+                rt._save_answer_json(base_dir, question, attempt, result_dict)
                 return result_dict
 
             messages = result.get("messages") or []
@@ -108,35 +102,14 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                 else None
             )
 
-            answer_path = os.path.join(
-                base_dir, "skills", "answer-formatting", "answer.json"
-            )
-            if os.path.exists(answer_path):
-                try:
-                    with open(answer_path, "r", encoding="utf-8") as f:
-                        file_parsed = json.load(f)
-                    if (
-                        isinstance(file_parsed, dict)
-                        and "sql_code" in file_parsed
-                        and "answer" in file_parsed
-                        and "result" in file_parsed
-                    ):
-                        return {
-                            "sql_code": file_parsed.get("sql_code", ""),
-                            "answer": file_parsed.get("answer", ""),
-                            "result": file_parsed.get("result"),
-                        }
-                except Exception as file_err:  # noqa: PERF203
-                    print(
-                        f"Warning: Failed to read answer-formatting output file: {file_err}"
-                    )
-
             if raw_content is not None:
-                return {
+                result_dict = {
                     "sql_code": "",
                     "answer": raw_content,
                     "result": None,
                 }
+                rt._save_answer_json(base_dir, question, attempt, result_dict)
+                return result_dict
         except Exception as e:  # noqa: PERF203
             print(
                 f"Error in get_deep_agent_sql_response (attempt {attempt}/{max_retries}): {e}"
@@ -149,6 +122,3 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
         "result": None,
     }
 
-
-# Legacy name kept for callers that expected the old ``get_sql_tool_response`` symbol.
-get_sql_tool_response = get_deep_agent_sql_response
