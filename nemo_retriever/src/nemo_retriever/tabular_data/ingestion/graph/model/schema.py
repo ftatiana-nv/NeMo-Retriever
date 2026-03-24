@@ -1,12 +1,12 @@
 import logging
 import uuid
-from nemo_retriever.tabular_data.ingestion.population.graph.model.node import Node
-from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import (
+from nemo_retriever.tabular_data.ingestion.graph.model.node import Node
+from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
     label_to_type,
 )
 import pandas as pd
 import numpy as np
-from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
 
 pd.options.mode.chained_assignment = None
 
