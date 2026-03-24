@@ -11,11 +11,11 @@ Each database in spider2-lite becomes a DuckDB schema, so you can query:
 
 Run once per machine (from the repo root):
 
-    python3 nemo_retriever/src/nemo_retriever/tabular_data/connectors/setup_spider2.py
+    python3 nemo_retriever/tabular-dev-tools/setup_spider2.py
 
 Optional flags:
 
-    python3 nemo_retriever/src/nemo_retriever/tabular_data/connectors/setup_spider2.py \\
+    python3 nemo_retriever/tabular-dev-tools/setup_spider2.py \\
         --spider2-dir ~/my_spider2 --db ./my.duckdb --overwrite
 
 After this completes, query via DuckDB:
@@ -32,7 +32,7 @@ import subprocess
 import sys
 from pathlib import Path
 from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
-from nemo_retriever.tabular_data.connectors.spider2_loader import load_spider2_lite
+from spider2_loader import load_spider2_lite
 
 
 # ---------------------------------------------------------------------------
