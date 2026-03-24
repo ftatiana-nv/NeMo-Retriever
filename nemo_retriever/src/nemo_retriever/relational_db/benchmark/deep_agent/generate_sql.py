@@ -35,6 +35,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
           or ``DEEP_AGENT_DUCKDB_SCHEMA``; see ``DEEP_AGENT_ALL_SCHEMAS`` env).
         - ``db`` / ``duckdb_schema``: Spider2 database id → DuckDB schema when **single-schema**
           mode is used.
+        - ``instance_id`` or ``sql_id``: benchmark task id; answer JSON is saved as
+          ``generated_answers/deep_agent/<sanitized_id>_attempt_XX.json``, same stem as
+          ``generated_sql/deep_agent/<sanitized_id>.sql`` from batch runs.
 
         Optional: ``user_id`` for future group resolution.
 
@@ -47,6 +50,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
 
     question = payload.get("question")
     _user_id = payload.get("user_id")
+    sql_id = payload.get("instance_id") or payload.get("sql_id")
+    if sql_id is not None:
+        sql_id = str(sql_id).strip() or None
     _ = account_id, _user_id  # reserved
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -91,7 +97,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                     "answer": parsed.get("answer", ""),
                     "result": parsed.get("result"),
                 }
-                rt._save_answer_json(base_dir, question, attempt, result_dict)
+                rt._save_answer_json(
+                    base_dir, question, attempt, result_dict, sql_id=sql_id
+                )
                 return result_dict
 
             messages = result.get("messages") or []
@@ -108,7 +116,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                     "answer": raw_content,
                     "result": None,
                 }
-                rt._save_answer_json(base_dir, question, attempt, result_dict)
+                rt._save_answer_json(
+                    base_dir, question, attempt, result_dict, sql_id=sql_id
+                )
                 return result_dict
         except Exception as e:  # noqa: PERF203
             print(

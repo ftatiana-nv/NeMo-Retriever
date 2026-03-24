@@ -61,24 +61,35 @@ def _safe_filename(instance_id: str) -> str:
     return re.sub(r'[^\w\-.]', "_", instance_id) or "unknown"
 
 
-def _parse_args(argv: list[str]) -> tuple[str | None, str, str | None]:
-    """Returns (prefix, mode, error_message). mode is 'sql-tool' or 'deep-agent'."""
+def _parse_args(argv: list[str]) -> tuple[str | None, str, int, str | None]:
+    """Returns (prefix, mode, top_k, error_message). mode is 'sql-tool' or 'deep-agent'."""
     args = list(argv)
     mode = "sql-tool"
     prefix = None
+    top_k = 15
     if "--mode" in args:
         i = args.index("--mode")
         if i + 1 >= len(args):
-            return None, mode, "--mode requires a value (sql-tool or deep-agent)"
+            return None, mode, top_k, "--mode requires a value (sql-tool or deep-agent)"
         raw = args[i + 1].strip().lower().replace("_", "-")
         if raw not in ("sql-tool", "deep-agent"):
-            return None, mode, f"unknown --mode {raw!r}; use sql-tool or deep-agent"
+            return None, mode, top_k, f"unknown --mode {raw!r}; use sql-tool or deep-agent"
         mode = raw
+    if "--top-k" in args:
+        i = args.index("--top-k")
+        if i + 1 >= len(args):
+            return None, mode, top_k, "--top-k requires a positive integer value"
+        try:
+            top_k = int(args[i + 1])
+        except ValueError:
+            return None, mode, top_k, "--top-k must be an integer"
+        if top_k <= 0:
+            return None, mode, top_k, "--top-k must be > 0"
     if "--prefix" in args:
         i = args.index("--prefix")
         if i + 1 < len(args):
             prefix = args[i + 1]
-    return prefix, mode, None
+    return prefix, mode, top_k, None
 
 
 def run_single(
@@ -87,11 +98,15 @@ def run_single(
     *,
     mode: str = "sql-tool",
     db: str | None = None,
+    instance_id: str | None = None,
 ) -> str:
     """Generate SQL for one question (sql-tool or deep-agent).
 
     For deep-agent, ``db`` is the Spider2 database id (jsonl ``db`` field) used to pick
     the DuckDB schema; optional if only one schema exists in the file.
+
+    Pass ``instance_id`` (e.g. jsonl ``instance_id``) so Deep Agent answer artifacts use
+    the same filename stem as ``generated_sql/deep_agent/<instance_id>.sql``.
     """
     if mode == "deep-agent":
         from nemo_retriever.relational_db.benchmark.deep_agent.generate_sql import (
@@ -101,6 +116,8 @@ def run_single(
         payload = {"question": question, "user_id": None}
         if db is not None:
             payload["db"] = db
+        if instance_id is not None:
+            payload["instance_id"] = instance_id
         response = get_deep_agent_sql_response("debug", payload)
         return (response.get("sql_code") or "").strip() or ""
 
@@ -188,7 +205,11 @@ def run_batch(
         try:
             if mode == "deep-agent":
                 sql_code = run_single(
-                    question, top_k=top_k, mode="deep-agent", db=db_id
+                    question,
+                    top_k=top_k,
+                    mode="deep-agent",
+                    db=db_id,
+                    instance_id=instance_id,
                 )
             else:
                 from nemo_retriever.relational_db.benchmark.sql_tool.generate_sql import (
@@ -214,21 +235,20 @@ def run_batch(
 
 def main() -> None:
     if "--batch" in sys.argv:
-        prefix, mode, err = _parse_args(sys.argv[1:])
+        prefix, mode, top_k, err = _parse_args(sys.argv[1:])
         if err:
             print(f"ERROR: {err}", file=sys.stderr)
             sys.exit(2)
-        run_batch(instance_id_prefix=prefix, mode=mode)
+        run_batch(instance_id_prefix=prefix, mode=mode, top_k=top_k)
         return
 
-    prefix, mode, err = _parse_args(sys.argv[1:])
+    prefix, mode, top_k, err = _parse_args(sys.argv[1:])
     if err:
         print(f"ERROR: {err}", file=sys.stderr)
         sys.exit(2)
 
     # Single-question mode
     question = "how much stacks do we have"
-    top_k = 15
 
     print("Mode:", mode)
     print("Question:", question)

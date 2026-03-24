@@ -40,7 +40,7 @@ _sql_agents: dict[str, Any] = {}
 # System / catalog schemas to skip when building tools
 _DUCKDB_SKIP_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
 
-# Internal delimiter for (schema, table) keys when listing all user schemas (unlikely in real names).
+# Canonical delimiter for (schema, table) keys in tools: always ``schema.table``.
 _SCHEMA_TABLE_JOINER = "."
 
 # Injected SQL catalog for Deep Agent (see ``_deep_agent_sql_catalog_prompt``). Not read from ``os.environ``.
@@ -50,7 +50,7 @@ DEEP_AGENT_SQL_CATALOG_MODE: str = "names"
 
 
 def _canonical_multi_schema_table_key(raw: str, all_tables: set[str]) -> str | None:
-    """Map tool input to internal key: accepts ``schema__/__table`` or ``schema.table``."""
+    """Map tool input to canonical key: ``schema.table`` (legacy separators still accepted)."""
     s = (raw or "").strip()
     if not s:
         return None
@@ -80,6 +80,44 @@ def _canonical_multi_schema_table_key(raw: str, all_tables: set[str]) -> str | N
 def _duckdb_quote_ident(ident: str) -> str:
     """Double-quote a DuckDB identifier (escape embedded quotes)."""
     return '"' + ident.replace('"', '""') + '"'
+
+
+def _duckdb_sqlalchemy_schema_parts(schema_str: str | None) -> tuple[str | None, str | None]:
+    """Map SQLAlchemy inspector schema names to DuckDB ``duckdb_columns()`` fields.
+
+    ``duckdb-engine`` reports attached-database schemas as a single string such as
+    ``spider2."E_commerce"`` (catalog + quoted schema). ``duckdb_columns()`` instead
+    stores ``database_name``, ``schema_name``, and ``table_name`` separately. Passing
+    the composite string as ``schema_name`` in SQL therefore matches **no** rows.
+
+    Returns ``(database_name, schema_name)``. Either part may be ``None`` when
+    ``schema_str`` is empty; a name without a dot is treated as a plain DuckDB schema
+    (``database_name`` is ``None``).
+    """
+    if schema_str is None or not str(schema_str).strip():
+        return None, None
+    s = str(schema_str).strip()
+    if "." not in s:
+        return None, s
+    first, rest = s.split(".", 1)
+    rest = rest.strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] == '"':
+        inner = rest[1:-1].replace('""', '"')
+        return first, inner
+    return first, rest
+
+
+def _duckdb_describe_fqtn(
+    database_name: str | None, schema_name: str, table_name: str
+) -> str:
+    """Build a catalog.schema.table reference for ``DESCRIBE`` (quoted identifiers)."""
+    if database_name:
+        return (
+            f"{_duckdb_quote_ident(database_name)}."
+            f"{_duckdb_quote_ident(schema_name)}."
+            f"{_duckdb_quote_ident(table_name)}"
+        )
+    return f"{_duckdb_quote_ident(schema_name)}.{_duckdb_quote_ident(table_name)}"
 
 
 def _make_schema_table_key(schema: str, table: str) -> str:
@@ -152,7 +190,10 @@ class DuckDBLangChainSQLDatabase(SQLDatabase):
                 raise ValueError(f"table_names {missing} not found in database")
             all_table_names = list(table_names)
 
-        sch = self._schema
+        db_part, sch_part = _duckdb_sqlalchemy_schema_parts(self._schema)
+        if sch_part is None and self._schema:
+            # Unusual binding; fall back to treating the whole string as schema_name.
+            db_part, sch_part = None, str(self._schema).strip()
         blocks: list[str] = []
         with self._engine.connect() as conn:
             for tname in sorted(all_table_names):
@@ -160,17 +201,32 @@ class DuckDBLangChainSQLDatabase(SQLDatabase):
                     blocks.append(self._custom_table_info[tname])
                     continue
 
-                rows = conn.execute(
-                    text(
-                        """
-                        SELECT column_name, data_type
-                        FROM duckdb_columns()
-                        WHERE schema_name = :sch AND table_name = :tn
-                        ORDER BY column_index NULLS LAST, column_name
-                        """
-                    ),
-                    {"sch": sch, "tn": tname},
-                ).fetchall()
+                if not sch_part:
+                    rows = []
+                elif db_part:
+                    rows = conn.execute(
+                        text(
+                            """
+                            SELECT column_name, data_type
+                            FROM duckdb_columns()
+                            WHERE database_name = :db AND schema_name = :sch AND table_name = :tn
+                            ORDER BY column_index NULLS LAST, column_name
+                            """
+                        ),
+                        {"db": db_part, "sch": sch_part, "tn": tname},
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        text(
+                            """
+                            SELECT column_name, data_type
+                            FROM duckdb_columns()
+                            WHERE schema_name = :sch AND table_name = :tn
+                            ORDER BY column_index NULLS LAST, column_name
+                            """
+                        ),
+                        {"sch": sch_part, "tn": tname},
+                    ).fetchall()
 
                 if not rows:
                     rows = conn.execute(
@@ -182,15 +238,31 @@ class DuckDBLangChainSQLDatabase(SQLDatabase):
                             ORDER BY ordinal_position
                             """
                         ),
-                        {"sch": sch, "tn": tname},
+                        {"sch": sch_part, "tn": tname},
                     ).fetchall()
+
+                # Last-resort fallback: metadata lookups can miss in some DuckDB setups,
+                # while direct SQL resolution still works.
+                if not rows and sch_part:
+                    try:
+                        target = _duckdb_describe_fqtn(db_part, sch_part, tname)
+                        desc_rows = conn.execute(text(f"DESCRIBE {target}")).fetchall()
+                        rows = [
+                            (r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]
+                        ]
+                    except Exception:  # noqa: PERF203
+                        rows = []
 
                 if not rows:
                     blocks.append(f'/* no columns found for "{tname}" */')
                     continue
 
                 col_lines = ",\n  ".join(f'"{r[0]}" {r[1]}' for r in rows)
-                blocks.append(f'CREATE TABLE "{tname}" (\n  {col_lines}\n);')
+                if db_part and sch_part:
+                    qual = _duckdb_describe_fqtn(db_part, sch_part, tname)
+                    blocks.append(f"CREATE TABLE {qual} (\n  {col_lines}\n);")
+                else:
+                    blocks.append(f'CREATE TABLE "{tname}" (\n  {col_lines}\n);')
 
         return "\n\n".join(blocks)
 
@@ -204,7 +276,7 @@ class DuckDBAllSchemasSQLDatabase(DuckDBLangChainSQLDatabase):
     ``"some_schema"."customers"``, matching the ``CREATE TABLE`` snippets here.
 
     Table keys passed to ``sql_db_schema`` / ``get_table_info`` look like
-    ``schema_name__/__table_name`` (see ``_SCHEMA_TABLE_JOINER``); use the qualified
+    ``schema.table`` (see ``_SCHEMA_TABLE_JOINER``); use the qualified
     ``CREATE TABLE`` form from ``sql_db_schema`` in real SQL.
     """
 
@@ -230,14 +302,22 @@ class DuckDBAllSchemasSQLDatabase(DuckDBLangChainSQLDatabase):
 
         insp = inspect(engine)
         keys: list[str] = []
+        # Inspector names look like ``spider2."E_commerce"``; tool keys must be
+        # ``E_commerce.table`` so ``_split_schema_table_key`` matches ``duckdb_columns()``.
+        self._table_key_catalog: dict[str, str | None] = {}
         for sch in user_schemas:
+            db_part, sch_part = _duckdb_sqlalchemy_schema_parts(sch)
+            if not sch_part:
+                sch_part = sch
             try:
                 tables = insp.get_table_names(schema=sch) or []
             except Exception as e:  # noqa: PERF203
                 print(f"Warning: could not list tables for schema {sch!r}: {e}")
                 tables = []
             for t in tables:
-                keys.append(_make_schema_table_key(sch, t))
+                k = _make_schema_table_key(sch_part, t)
+                keys.append(k)
+                self._table_key_catalog[k] = db_part
 
         self._all_tables = set(keys)
         u = list(self.get_usable_table_names())
@@ -284,18 +364,32 @@ class DuckDBAllSchemasSQLDatabase(DuckDBLangChainSQLDatabase):
                     continue
 
                 sch, tn = _split_schema_table_key(tname)
+                db_part = self._table_key_catalog.get(tname)
 
-                rows = conn.execute(
-                    text(
-                        """
-                        SELECT column_name, data_type
-                        FROM duckdb_columns()
-                        WHERE schema_name = :sch AND table_name = :tn
-                        ORDER BY column_index NULLS LAST, column_name
-                        """
-                    ),
-                    {"sch": sch, "tn": tn},
-                ).fetchall()
+                if db_part:
+                    rows = conn.execute(
+                        text(
+                            """
+                            SELECT column_name, data_type
+                            FROM duckdb_columns()
+                            WHERE database_name = :db AND schema_name = :sch AND table_name = :tn
+                            ORDER BY column_index NULLS LAST, column_name
+                            """
+                        ),
+                        {"db": db_part, "sch": sch, "tn": tn},
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        text(
+                            """
+                            SELECT column_name, data_type
+                            FROM duckdb_columns()
+                            WHERE schema_name = :sch AND table_name = :tn
+                            ORDER BY column_index NULLS LAST, column_name
+                            """
+                        ),
+                        {"sch": sch, "tn": tn},
+                    ).fetchall()
 
                 if not rows:
                     rows = conn.execute(
@@ -310,12 +404,23 @@ class DuckDBAllSchemasSQLDatabase(DuckDBLangChainSQLDatabase):
                         {"sch": sch, "tn": tn},
                     ).fetchall()
 
+                # Keep schema introspection aligned with SQL execution behavior.
+                if not rows:
+                    try:
+                        target = _duckdb_describe_fqtn(db_part, sch, tn)
+                        desc_rows = conn.execute(text(f"DESCRIBE {target}")).fetchall()
+                        rows = [
+                            (r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]
+                        ]
+                    except Exception:  # noqa: PERF203
+                        rows = []
+
                 if not rows:
                     blocks.append(f'/* no columns found for {tname!r} */')
                     continue
 
                 col_lines = ",\n  ".join(f'"{r[0]}" {r[1]}' for r in rows)
-                qual = f"{_duckdb_quote_ident(sch)}.{_duckdb_quote_ident(tn)}"
+                qual = _duckdb_describe_fqtn(db_part, sch, tn)
                 blocks.append(f"CREATE TABLE {qual} (\n  {col_lines}\n);")
 
         return "\n\n".join(blocks)
@@ -601,23 +706,47 @@ def _get_sql_agent(
     return agent
 
 
-def _answer_artifact_path(base_dir: str, question: str, attempt: int) -> str:
+def _safe_sql_id_filename(sql_id: str) -> str:
+    """Sanitize benchmark ``instance_id`` / ``sql_id`` for filenames (same rules as ``debug_retriever_sql._safe_filename``)."""
+    return re.sub(r"[^\w\-.]", "_", (sql_id or "").strip()) or "unknown"
+
+
+def _answer_artifact_path(
+    base_dir: str,
+    question: str,
+    attempt: int,
+    *,
+    sql_id: str | None = None,
+) -> str:
     """Return per-question answer artifact path under ``generated_answers/deep_agent``."""
-    # Keep a short, stable filename prefix from the beginning of the question.
-    q = (question or "").strip().lower()
-    prefix = re.sub(r"[^a-z0-9]+", "_", q).strip("_")
-    prefix = (prefix[:24] or "question")
-    filename = f"{prefix}_attempt_{attempt:02d}.json"
+    if sql_id:
+        stem = _safe_sql_id_filename(sql_id)
+        filename = f"{stem}_attempt_{attempt:02d}.json"
+    else:
+        # Debug / ad-hoc runs without a benchmark id: short prefix from question text.
+        q = (question or "").strip().lower()
+        prefix = re.sub(r"[^a-z0-9]+", "_", q).strip("_")
+        prefix = prefix[:24] or "question"
+        filename = f"{prefix}_attempt_{attempt:02d}.json"
     return os.path.join(base_dir, "generated_answers", "deep_agent", filename)
 
 
-def _save_answer_json(base_dir: str, question: str, attempt: int, answer: dict) -> None:
+def _save_answer_json(
+    base_dir: str,
+    question: str,
+    attempt: int,
+    answer: dict,
+    *,
+    sql_id: str | None = None,
+) -> None:
     """
-    Persist the structured SQL answer to ``generated_answers/deep_agent/<question>_attempt_XX.json``
-    for easier inspection/debugging.
+    Persist the structured SQL answer under ``generated_answers/deep_agent/``.
+
+    With ``sql_id`` (benchmark ``instance_id``), filenames align with
+    ``generated_sql/deep_agent/<sanitized_instance_id>.sql`` (same stem + ``_attempt_XX``).
     """
     try:
-        answer_path = _answer_artifact_path(base_dir, question, attempt)
+        answer_path = _answer_artifact_path(base_dir, question, attempt, sql_id=sql_id)
         os.makedirs(os.path.dirname(answer_path), exist_ok=True)
         with open(answer_path, "w", encoding="utf-8") as f:
             json.dump(answer, f, ensure_ascii=False)
