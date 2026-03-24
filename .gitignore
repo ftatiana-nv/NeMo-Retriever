@@ -270,6 +270,10 @@ nemo_retriever/src/nemo_retriever/relational_db/benchmark/spider2-lite.jsonl
 
 nemo_retriever/src/nemo_retriever/relational_db/benchmark/deep_agent/generated_sql/
 
+nemo_retriever/src/nemo_retriever/relational_db/generate_sql/generated_sql/
+
+nemo_retriever/src/nemo_retriever/relational_db/generate_sql/spider2-lite.jsonl
+
 .env.example
 
 scripts/inspect_lancedb.py
