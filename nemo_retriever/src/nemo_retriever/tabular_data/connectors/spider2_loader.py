@@ -14,13 +14,10 @@ from __future__ import annotations
 import json as _json
 import logging
 import re
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Union
-
 import pandas as pd
-
-if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
+from pathlib import Path
+from typing import Any, Dict, List, Union
+from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
 
 logger = logging.getLogger(__name__)
 

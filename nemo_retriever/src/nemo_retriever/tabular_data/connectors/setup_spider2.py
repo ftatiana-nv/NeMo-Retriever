@@ -31,6 +31,8 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
+from nemo_retriever.tabular_data.connectors.spider2_loader import load_spider2_lite
 
 
 # ---------------------------------------------------------------------------
@@ -67,20 +69,6 @@ def _clone_spider2(target_dir: Path) -> None:
 
 
 def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
-    try:
-        from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
-        from nemo_retriever.tabular_data.connectors.spider2_loader import (
-            load_spider2_lite,
-        )
-    except ImportError:
-        print(
-            "\n[error] Could not import nemo_retriever. Install the package first:\n\n"
-            "    uv pip install -e nemo_retriever/ --no-deps\n"
-            "    uv pip install duckdb\n",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
     if not spider2_lite_dir.exists():
         print(
             f"\n[error] spider2-lite directory not found: {spider2_lite_dir}\n"

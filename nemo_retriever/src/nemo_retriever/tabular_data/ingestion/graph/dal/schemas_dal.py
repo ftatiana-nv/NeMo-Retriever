@@ -21,15 +21,10 @@ def load_schema_from_graph(
     db_name,
     schema_name,
     db_node=None,
-    is_temp=False,
-    include_deleted: bool = False,
 ):
-    tables_df = get_schema_tables(db_name, schema_name, include_deleted)
-    columns_df = get_schema_columns(db_name, schema_name, include_deleted)
-    if not tables_df.empty and not columns_df.empty:
-        tables_df["is_temp"] = is_temp
-        columns_df["is_temp"] = is_temp
-    else:
+    tables_df = get_schema_tables(db_name, schema_name)
+    columns_df = get_schema_columns(db_name, schema_name)
+    if tables_df.empty or columns_df.empty:
         tables_df = None
         columns_df = None
 
@@ -37,38 +32,31 @@ def load_schema_from_graph(
         db_node = Node(name=db_name, label=Labels.DB, props={"name": db_name})
 
     schema = Schema(db_node, tables_df, columns_df)
-    schema.create_schema_node(schema_name, is_temp=is_temp)
+    schema.create_schema_node(schema_name)
     return schema
 
 
-def get_schemas_ids_and_names(db_id: str = None, include_deleted: bool = False):
+def get_schemas_ids_and_names(db_id: str = None):
     db_filter = " {id:$db_id}" if db_id else ""
-    query = f"""MATCH(db:{Labels.DB}{db_filter})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA}|{Labels.TEMP_SCHEMA})
-                {"" if include_deleted else "WHERE coalesce(s.deleted, false) = false"}
+    query = f"""MATCH(db:{Labels.DB}{db_filter})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA})
+                WHERE coalesce(s.deleted, false) = false
                 RETURN s.name as schema_name, s.id as schema_id
             """
     result = pd.DataFrame(
         conn.query_read(
             query=query,
-            parameters={
-                "db_id": db_id,
-                "include_deleted": include_deleted,
-            },
+            parameters={"db_id": db_id},
         )
     )
     return result.to_dict(orient="records")
 
 
-def get_schema_columns(db_name, schema_name, include_deleted: bool = False):
+def get_schema_columns(db_name, schema_name):
     # Use c_id alias: "id" is reserved in Cypher
     deleted_filter = (
-        ""
-        if include_deleted
-        else (
-            " WHERE coalesce(s.deleted, false) = false"
-            " and coalesce(t.deleted, false) = false"
-            " and coalesce(c.deleted, false) = false "
-        )
+        " WHERE coalesce(s.deleted, false) = false"
+        " and coalesce(t.deleted, false) = false"
+        " and coalesce(c.deleted, false) = false "
     )
     query = f"""MATCH (d:{Labels.DB}{{name:$db_name}})-[:{RelTypes.CONTAINS}]->
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{RelTypes.CONTAINS}]->
@@ -112,13 +100,9 @@ def get_schema_columns(db_name, schema_name, include_deleted: bool = False):
     return load_columns(pd.DataFrame(res[0]["columns"] if res[0]["columns"] else []))
 
 
-def get_schema_tables(db_name, schema_name, include_deleted: bool = False):
+def get_schema_tables(db_name, schema_name):
     # Use t_id alias: "id" is reserved in Cypher
-    deleted_filter = (
-        ""
-        if include_deleted
-        else (" WHERE coalesce(s.deleted, false) = false" " and coalesce(t.deleted, false) = false ")
-    )
+    deleted_filter = " WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false "
     query = f"""MATCH (d:{Labels.DB}{{name:$db_name}})-[:{RelTypes.CONTAINS}]->
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{RelTypes.CONTAINS}]->
                 (t:{Labels.TABLE})
@@ -145,16 +129,6 @@ def get_schema_tables(db_name, schema_name, include_deleted: bool = False):
     return load_tables(pd.DataFrame(res[0]["tables"] if res[0]["tables"] else []))
 
 
-def get_db_ids_and_names(connection_id=None):
-    if connection_id:
-        query = f"""match (c:{Labels.CONNECTION} {{id: $conn_id}})-[:{RelTypes.CONNECTING}]->(db:{Labels.DB})
-                   return collect({{id: db.id, name:db.name}}) as dbs"""
-    else:
-        query = f"""match (db:{Labels.DB})
-                   return collect({{id: db.id, name:db.name}}) as dbs"""
-    return conn.query_read(query=query, parameters={"conn_id": connection_id})[0]["dbs"]
-
-
 def add_schemas_edge(edge, created):
     """
     If the nodes do not exist in the Neo4j graph, the function adds them.
@@ -174,15 +148,11 @@ def add_schemas_edge(edge, created):
         query = f"""
             CALL apoc.merge.node.eager($from_label, $from_identProps, $v_props, {{id:$v_props.id}})
             yield node as v1
-            set v1.created = case when coalesce(v1.deleted, false) = false
-                then coalesce(v1.created, $created) else $created end
-            set v1.deleted = false
+            set v1.created = coalesce(v1.created, $created)
             with v1
             call apoc.merge.node.eager($to_label, $to_identProps, $u_props, {{id:$u_props.id}})
             yield node as v2
-            set v2.created = case when coalesce(v2.deleted, false) = false
-                then coalesce(v2.created, $created) else $created end
-            set v2.deleted = false
+            set v2.created = coalesce(v2.created, $created)
             MERGE (v1)-[r:{RelTypes.CONTAINS}]->(v2)
             SET r = $optional_edge_props
             """
@@ -265,9 +235,7 @@ def merge_schema_nodes(nodes, created):
                             UNWIND $nodes as node
                             CALL apoc.merge.node.eager(node.label, node.match_props, node.props, {id:node.props.id})
                             yield node as v1
-                            set v1.created = case when coalesce(v1.deleted, false) = false
-                                then coalesce(v1.created, $created) else $created end
-                            set v1.deleted = false
+                            set v1.created = coalesce(v1.created, $created)
                             set v1.description = coalesce(v1.description, node.props.description)
                         """
     conn.query_write(

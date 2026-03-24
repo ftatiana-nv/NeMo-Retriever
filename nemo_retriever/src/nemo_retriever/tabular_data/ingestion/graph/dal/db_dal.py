@@ -64,19 +64,11 @@ def add_schemas_edge_batch(edges, created):
             UNWIND $edges as e
             CALL apoc.merge.node.eager([e.from_label], e.from_identProps, e.v_props, {{id:e.v_props.id}})
             yield node as v1
-            set v1.created = case when coalesce(v1.deleted, false) = false
-            then coalesce(v1.created, $created)
-            else $created end
-
-            set v1.deleted = false
+            set v1.created = coalesce(v1.created, $created)
             with v1, e
             call apoc.merge.node.eager([e.to_label], e.to_identProps, e.u_props, {{id:e.u_props.id}})
             yield node as v2
-            set v2.created = case when coalesce(v2.deleted, false) = false
-            then coalesce(v2.created, $created)
-            else $created end
-
-            set v2.deleted = false
+            set v2.created = coalesce(v2.created, $created)
             MERGE (v1)-[r:{Edges.CONTAINS}]->(v2)
             SET r = e.optional_edge_props
             """
