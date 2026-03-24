@@ -14,19 +14,24 @@ import sys
 import time
 from importlib import import_module
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import Any, Optional, TextIO
 
+from nemo_retriever.utils.detection_summary import print_run_summary
 import ray
 import typer
 from nemo_retriever import create_ingestor
 from nemo_retriever.ingest_modes.batch import BatchIngestor
+from nemo_retriever.ingest_modes.lancedb_utils import lancedb_schema
+from nemo_retriever.model import resolve_embed_model
 from nemo_retriever.params import EmbedParams
 from nemo_retriever.params import ExtractParams
 from nemo_retriever.params import IngestExecuteParams
 from nemo_retriever.params import IngestorCreateParams
 from nemo_retriever.params import TextChunkParams
-from nemo_retriever.params import VdbUploadParams
+from nemo_retriever.recall.beir import BeirConfig, evaluate_lancedb_beir
 from nemo_retriever.recall.core import RecallConfig, retrieve_and_score
+from nemo_retriever.utils.remote_auth import resolve_remote_api_key
+from nemo_retriever.vector_store.lancedb_store import handle_lancedb
 
 logger = logging.getLogger(__name__)
 
@@ -105,28 +110,6 @@ def _configure_logging(log_file: Optional[Path], *, debug: bool = False) -> tupl
     return fh, original_stdout, original_stderr
 
 
-def _to_int(value: object, default: int = 0) -> int:
-    try:
-        if value is None:
-            return default
-        return int(value)
-    except Exception:
-        return default
-
-
-def _collect_detection_summary(uri: str, table_name: str) -> Optional[dict]:
-    """Collect per-model detection totals deduped by (source_id, page_number)."""
-    from nemo_retriever.utils.detection_summary import collect_detection_summary_from_lancedb
-
-    return collect_detection_summary_from_lancedb(uri, table_name)
-
-
-def _print_detection_summary(summary: Optional[dict]) -> None:
-    from nemo_retriever.utils.detection_summary import print_detection_summary
-
-    print_detection_summary(summary)
-
-
 def _extract_error_payloads(v: object) -> list[object]:
     """Recursively extract only error payloads from nested values."""
     payloads: list[object] = []
@@ -158,41 +141,11 @@ def _extract_error_payloads(v: object) -> list[object]:
     return payloads
 
 
-def _write_detection_summary(path: Path, summary: Optional[dict]) -> None:
-    target = Path(path).expanduser().resolve()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    payload = summary if summary is not None else {"error": "Detection summary unavailable."}
-    target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def _print_pages_per_second(processed_pages: Optional[int], ingest_elapsed_s: float) -> None:
-    if ingest_elapsed_s <= 0:
-        print("Pages/sec: unavailable (ingest elapsed time was non-positive).")
-        return
-    if processed_pages is None:
-        print("Pages/sec: unavailable (could not estimate processed pages). " f"Ingest time: {ingest_elapsed_s:.2f}s")
-        return
-
-    pps = processed_pages / ingest_elapsed_s
-    print(f"Pages processed: {processed_pages}")
-    print(f"Pages/sec (ingest only; excludes Ray startup and recall): {pps:.2f}")
-
-
-def _count_materialized_rows(dataset: object) -> int:
-    """Count rows from a materialized Ray Dataset without relying on ``len()``."""
-    count = getattr(dataset, "count", None)
-    if callable(count):
-        return int(count())
-    return len(dataset)  # type: ignore[arg-type]
-
-
 def _ensure_lancedb_table(uri: str, table_name: str) -> None:
     """Ensure the local LanceDB URI exists and table can be opened.
 
     Creates an empty table with the expected schema if it does not exist yet.
     """
-    from nemo_retriever.ingest_modes.lancedb_utils import lancedb_schema
-
     Path(uri).mkdir(parents=True, exist_ok=True)
 
     db = _lancedb().connect(uri)
@@ -204,9 +157,29 @@ def _ensure_lancedb_table(uri: str, table_name: str) -> None:
 
     import pyarrow as pa  # type: ignore
 
-    schema = lancedb_schema(2048)
+    schema = lancedb_schema()
     empty = pa.table({f.name: [] for f in schema}, schema=schema)
     db.create_table(table_name, data=empty, schema=schema, mode="create")
+
+
+def _gold_to_doc_page(golden_key: str) -> tuple[str, str]:
+    s = str(golden_key)
+    if "_" not in s:
+        return s, ""
+    doc, page = s.rsplit("_", 1)
+    return doc, page
+
+
+def _hit_key_and_distance(hit: dict) -> tuple[str | None, float | None]:
+
+    source_id = hit.get("source_id")
+    page_number = hit.get("page_number")
+    if not source_id or page_number is None:
+        return None, float(hit.get("_distance")) if "_distance" in hit else None
+
+    key = f"{Path(str(source_id)).stem}_{page_number}"
+    dist = float(hit["_distance"]) if "_distance" in hit else float(hit["_score"]) if "_score" in hit else None
+    return key, dist
 
 
 @app.command()
@@ -216,6 +189,12 @@ def main(
         False,
         "--debug/--no-debug",
         help="Enable debug-level logging for this full pipeline run.",
+    ),
+    dpi: int = typer.Option(
+        300,
+        "--dpi",
+        min=72,
+        help="Render DPI for PDF page images (default: 300).",
     ),
     input_path: Path = typer.Argument(
         ...,
@@ -233,6 +212,11 @@ def main(
         "pdf_page",
         "--recall-match-mode",
         help="Recall match mode: 'pdf_page' or 'pdf_only'.",
+    ),
+    evaluation_mode: str = typer.Option(
+        "recall",
+        "--evaluation-mode",
+        help="Evaluation mode after LanceDB upload: 'recall' or 'beir'.",
     ),
     no_recall_details: bool = typer.Option(
         False,
@@ -268,10 +252,45 @@ def main(
         "--embed-granularity",
         help="Embedding granularity: 'element' (one row per table/chart/text) or 'page' (one row per page).",
     ),
+    beir_loader: Optional[str] = typer.Option(
+        None,
+        "--beir-loader",
+        help="BEIR-style evaluation loader identifier (for example, 'vidore_hf').",
+    ),
+    beir_dataset_name: Optional[str] = typer.Option(
+        None,
+        "--beir-dataset-name",
+        help="Dataset name used by the BEIR loader (for example, 'vidore_v3_computer_science').",
+    ),
+    beir_split: str = typer.Option(
+        "test",
+        "--beir-split",
+        help="Dataset split name for BEIR-style evaluation.",
+    ),
+    beir_query_language: Optional[str] = typer.Option(
+        None,
+        "--beir-query-language",
+        help="Optional query language filter for BEIR-style evaluation.",
+    ),
+    beir_doc_id_field: str = typer.Option(
+        "pdf_basename",
+        "--beir-doc-id-field",
+        help="LanceDB hit field to use as the BEIR document identifier.",
+    ),
+    beir_k: list[int] = typer.Option(
+        [],
+        "--beir-k",
+        help="Cutoff(s) for BEIR-style metrics. Repeatable; defaults to 1,3,5,10.",
+    ),
     graphic_elements_invoke_url: Optional[str] = typer.Option(
         None,
         "--graphic-elements-invoke-url",
         help="Optional remote endpoint URL for graphic-elements model inference.",
+    ),
+    api_key: Optional[str] = typer.Option(
+        None,
+        "--api-key",
+        help="Optional bearer token for remote NIM endpoints. Defaults to NVIDIA_API_KEY, then NGC_API_KEY.",
     ),
     embed_invoke_url: Optional[str] = typer.Option(
         None,
@@ -286,8 +305,7 @@ def main(
     embed_modality: str = typer.Option(
         "text",
         "--embed-modality",
-        help="Default embedding modality for all element types: "
-        "'text', 'image', or 'text_image' ('image_text' is also accepted).",
+        help="Default embedding modality for all element types: 'text', 'image', or 'text_image'.",
     ),
     hybrid: bool = typer.Option(
         False,
@@ -297,12 +315,17 @@ def main(
     input_type: str = typer.Option(
         "pdf",
         "--input-type",
-        help="Input format: 'pdf', 'txt', 'html', or 'doc'. Use 'txt' for .txt, 'html' for .html (markitdown -> chunks), 'doc' for .docx/.pptx (converted to PDF via LibreOffice).",  # noqa: E501
+        help="Input format: 'pdf', 'txt', 'html', 'doc', or 'image'. Use 'txt' for .txt, 'html' for .html (markitdown -> chunks), 'doc' for .docx/.pptx (converted to PDF via LibreOffice), 'image' for standalone image files (PNG, JPEG, BMP, TIFF, SVG).",  # noqa: E501
     ),
     lancedb_uri: str = typer.Option(
         LANCEDB_URI,
         "--lancedb-uri",
         help="LanceDB URI/path for this run.",
+    ),
+    method: str = typer.Option(
+        "pdfium",
+        "--method",
+        help="PDF text extraction method: 'pdfium' (native only), 'pdfium_hybrid' (native + OCR for scanned), 'ocr' (OCR all pages), or 'nemotron_parse' (Nemotron Parse only, auto-configured).",  # noqa: E501
     ),
     log_file: Optional[Path] = typer.Option(
         None,
@@ -443,6 +466,14 @@ def main(
         "--runtime-metrics-prefix",
         help="Optional filename prefix for per-run metrics artifacts.",
     ),
+    reranker: Optional[bool] = typer.Option(
+        False, "--reranker/--no-reranker", help="Enable a re-ranking stage with a cross-encoder model."
+    ),
+    reranker_model_name: str = typer.Option(
+        "nvidia/llama-nemotron-rerank-1b-v2",
+        "--reranker-model-name",
+        help="Cross-encoder model name for re-ranking stage (passed to .embed()).",
+    ),
     structured_elements_modality: Optional[str] = typer.Option(
         None,
         "--structured-elements-modality",
@@ -480,16 +511,77 @@ def main(
             "(used when --table-output-format=markdown)."
         ),
     ),
+    extract_infographics: bool = typer.Option(
+        False,
+        "--extract-infographics/--no-extract-infographics",
+        help="Extract infographic content alongside tables and charts.",
+    ),
+    extract_page_as_image: bool = typer.Option(
+        True,
+        "--extract-page-as-image/--no-extract-page-as-image",
+        help="Render and retain full page images for downstream multimodal stages.",
+    ),
+    text_chunk: bool = typer.Option(
+        False,
+        "--text-chunk",
+        help=(
+            "Re-chunk extracted page text by token count before embedding. "
+            "Uses --text-chunk-max-tokens and --text-chunk-overlap-tokens (defaults: 1024, 150)."
+        ),
+    ),
+    text_chunk_max_tokens: Optional[int] = typer.Option(
+        None,
+        "--text-chunk-max-tokens",
+        help="Max tokens per text chunk (default: 1024). Implies --text-chunk.",
+    ),
+    text_chunk_overlap_tokens: Optional[int] = typer.Option(
+        None,
+        "--text-chunk-overlap-tokens",
+        help="Token overlap between consecutive text chunks (default: 150). Implies --text-chunk.",
+    ),
 ) -> None:
     log_handle, original_stdout, original_stderr = _configure_logging(log_file, debug=bool(debug))
     try:
         if recall_match_mode not in {"pdf_page", "pdf_only"}:
             raise ValueError(f"Unsupported --recall-match-mode: {recall_match_mode}")
+        if evaluation_mode not in {"recall", "beir"}:
+            raise ValueError(f"Unsupported --evaluation-mode: {evaluation_mode}")
 
         os.environ["RAY_LOG_TO_DRIVER"] = "1" if ray_log_to_driver else "0"
         # Use an absolute path so driver and Ray actors resolve the same LanceDB URI.
         lancedb_uri = str(Path(lancedb_uri).expanduser().resolve())
         _ensure_lancedb_table(lancedb_uri, LANCEDB_TABLE)
+        remote_api_key = resolve_remote_api_key(api_key)
+        extract_remote_api_key = (
+            remote_api_key
+            if any(
+                (
+                    page_elements_invoke_url,
+                    ocr_invoke_url,
+                    graphic_elements_invoke_url,
+                    table_structure_invoke_url,
+                )
+            )
+            else None
+        )
+        embed_remote_api_key = remote_api_key if embed_invoke_url else None
+
+        if (
+            any(
+                (
+                    page_elements_invoke_url,
+                    ocr_invoke_url,
+                    graphic_elements_invoke_url,
+                    table_structure_invoke_url,
+                    embed_invoke_url,
+                )
+            )
+            and remote_api_key is None
+        ):
+            logger.warning(
+                "Remote endpoint URL(s) were configured without an API key. "
+                "If these endpoints are hosted on build.nvidia.com, set --api-key or NVIDIA_API_KEY."
+            )
 
         # Remote endpoints don't need local model GPUs for their stage.
         if page_elements_invoke_url and float(page_elements_gpus_per_actor) != 0.0:
@@ -513,6 +605,23 @@ def main(
             )
             embed_gpus_per_actor = 0.0
 
+        # Map single-extension image shortcuts (e.g. "png", "jpg") to a specific
+        # glob while routing through the "image" pipeline.
+        _image_ext_map = {
+            "png": ["*.png"],
+            "jpg": ["*.jpg", "*.jpeg"],
+            "jpeg": ["*.jpg", "*.jpeg"],
+            "bmp": ["*.bmp"],
+            "tiff": ["*.tiff", "*.tif"],
+            "tif": ["*.tiff", "*.tif"],
+            "svg": ["*.svg"],
+        }
+        # Remember the original input_type for glob selection before normalizing
+        # to the canonical pipeline name.
+        _original_input_type = input_type
+        if input_type in _image_ext_map:
+            input_type = "image"
+
         input_path = Path(input_path)
         if input_path.is_file():
             file_patterns = [str(input_path)]
@@ -521,9 +630,23 @@ def main(
                 "txt": ["*.txt"],
                 "html": ["*.html"],
                 "doc": ["*.docx", "*.pptx"],
+                "image": ["*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tiff", "*.tif", "*.svg"],
             }
-            exts = ext_map.get(input_type, ["*.pdf"])
-            file_patterns = [str(input_path / e) for e in exts]
+            # If a specific image extension was requested, use only that extension's globs.
+            if _original_input_type in _image_ext_map:
+                exts = _image_ext_map[_original_input_type]
+            else:
+                exts = ext_map.get(input_type, ["*.pdf"])
+            import glob as _glob
+
+            all_candidates = [str(input_path / e) for e in exts]
+            # Only keep globs that match at least one file (avoids errors for
+            # missing extensions when input_type covers multiple formats).
+            file_patterns = [p for p in all_candidates if _glob.glob(p)]
+            if not file_patterns:
+                raise typer.BadParameter(
+                    f"No files found for input_type={input_type!r} in {input_path} " f"(tried: {', '.join(exts)})"
+                )
         else:
             raise typer.BadParameter(f"Path does not exist: {input_path}")
 
@@ -534,189 +657,97 @@ def main(
             ),
         )
 
+        # -- Shared params used by multiple input-type branches ----------------
+        embed_params = EmbedParams(
+            model_name=str(embed_model_name),
+            embed_invoke_url=embed_invoke_url,
+            api_key=embed_remote_api_key,
+            embed_modality=embed_modality,
+            text_elements_modality=text_elements_modality,
+            structured_elements_modality=structured_elements_modality,
+            embed_granularity=embed_granularity,
+            batch_tuning={
+                "embed_workers": embed_actors,
+                "embed_batch_size": int(embed_batch_size),
+                "embed_cpus_per_actor": float(embed_cpus_per_actor),
+                "gpu_embed": float(embed_gpus_per_actor),
+            },
+        )
+        # txt/html don't use embed_granularity from batch_tuning the same way,
+        # but the extra keys are harmlessly ignored by EmbedParams.
+
+        # Detection batch_tuning shared by pdf, doc, and image pipelines.
+        _detection_batch_tuning = {
+            "debug_run_id": str(runtime_metrics_prefix or "unknown"),
+            "page_elements_batch_size": page_elements_batch_size,
+            "page_elements_workers": page_elements_actors,
+            "detect_workers": ocr_actors,
+            "detect_batch_size": ocr_batch_size,
+            "ocr_inference_batch_size": ocr_batch_size,
+            "page_elements_cpus_per_actor": page_elements_cpus_per_actor,
+            "ocr_cpus_per_actor": ocr_cpus_per_actor,
+            "gpu_page_elements": page_elements_gpus_per_actor,
+            "gpu_ocr": ocr_gpus_per_actor,
+            "gpu_embed": embed_gpus_per_actor,
+            "nemotron_parse_workers": nemotron_parse_actors,
+            "gpu_nemotron_parse": nemotron_parse_gpus_per_actor,
+            "nemotron_parse_batch_size": nemotron_parse_batch_size,
+        }
+
+        # PDF-specific tuning keys (split/extract workers) on top of detection tuning.
+        _pdf_batch_tuning = {
+            **_detection_batch_tuning,
+            "pdf_extract_workers": pdf_extract_tasks,
+            "pdf_extract_num_cpus": pdf_extract_cpus_per_task,
+            "pdf_split_batch_size": pdf_split_batch_size,
+            "pdf_extract_batch_size": pdf_extract_batch_size,
+        }
+
+        # ExtractParams shared by detection-based pipelines (pdf, doc, image).
+        def _extract_params(batch_tuning: dict, **overrides: Any) -> ExtractParams:
+            return ExtractParams(
+                method=method,
+                dpi=int(dpi),
+                extract_text=True,
+                extract_tables=True,
+                extract_charts=True,
+                extract_infographics=extract_infographics,
+                extract_page_as_image=extract_page_as_image,
+                api_key=extract_remote_api_key,
+                use_graphic_elements=use_graphic_elements,
+                graphic_elements_invoke_url=graphic_elements_invoke_url,
+                inference_batch_size=page_elements_batch_size,
+                use_table_structure=use_table_structure,
+                table_output_format=table_output_format,
+                table_structure_invoke_url=table_structure_invoke_url,
+                page_elements_invoke_url=page_elements_invoke_url,
+                ocr_invoke_url=ocr_invoke_url,
+                batch_tuning={**batch_tuning, **overrides},
+            )
+
+        _text_chunk_params = TextChunkParams(
+            max_tokens=text_chunk_max_tokens or 1024,
+            overlap_tokens=text_chunk_overlap_tokens if text_chunk_overlap_tokens is not None else 150,
+        )
+
         if input_type == "txt":
-            ingestor = (
-                ingestor.files(file_patterns)
-                .extract_txt(TextChunkParams(max_tokens=512, overlap_tokens=0))
-                .embed(
-                    EmbedParams(
-                        model_name=str(embed_model_name),
-                        embed_invoke_url=embed_invoke_url,
-                        embed_modality=embed_modality,
-                        text_elements_modality=text_elements_modality,
-                        structured_elements_modality=structured_elements_modality,
-                        embed_granularity=embed_granularity,
-                    )
-                )
-                .vdb_upload(
-                    VdbUploadParams(
-                        lancedb={
-                            "lancedb_uri": lancedb_uri,
-                            "table_name": LANCEDB_TABLE,
-                            "overwrite": True,
-                            "create_index": True,
-                            "hybrid": hybrid,
-                        }
-                    )
-                )
-            )
+            ingestor = ingestor.files(file_patterns).extract_txt(_text_chunk_params)
         elif input_type == "html":
-            ingestor = (
-                ingestor.files(file_patterns)
-                .extract_html(TextChunkParams(max_tokens=512, overlap_tokens=0))
-                .embed(
-                    EmbedParams(
-                        model_name=str(embed_model_name),
-                        embed_invoke_url=embed_invoke_url,
-                        embed_modality=embed_modality,
-                        text_elements_modality=text_elements_modality,
-                        structured_elements_modality=structured_elements_modality,
-                        embed_granularity=embed_granularity,
-                    )
-                )
-                .vdb_upload(
-                    VdbUploadParams(
-                        lancedb={
-                            "lancedb_uri": lancedb_uri,
-                            "table_name": LANCEDB_TABLE,
-                            "overwrite": True,
-                            "create_index": True,
-                            "hybrid": hybrid,
-                        }
-                    )
-                )
-            )
+            ingestor = ingestor.files(file_patterns).extract_html(_text_chunk_params)
+        elif input_type == "image":
+            ingestor = ingestor.files(file_patterns).extract_image_files(_extract_params(_detection_batch_tuning))
         elif input_type == "doc":
-            ingestor = (
-                ingestor.files(file_patterns)
-                .extract(
-                    ExtractParams(
-                        extract_text=True,
-                        extract_tables=True,
-                        extract_charts=True,
-                        extract_infographics=False,
-                        use_graphic_elements=use_graphic_elements,
-                        graphic_elements_invoke_url=graphic_elements_invoke_url,
-                        inference_batch_size=page_elements_batch_size,
-                        use_table_structure=use_table_structure,
-                        table_output_format=table_output_format,
-                        table_structure_invoke_url=table_structure_invoke_url,
-                        page_elements_invoke_url=page_elements_invoke_url,
-                        ocr_invoke_url=ocr_invoke_url,
-                        batch_tuning={
-                            "debug_run_id": str(runtime_metrics_prefix or "unknown"),
-                            "pdf_extract_workers": pdf_extract_tasks,
-                            "pdf_extract_num_cpus": pdf_extract_cpus_per_task,
-                            "pdf_split_batch_size": pdf_split_batch_size,
-                            "pdf_extract_batch_size": pdf_extract_batch_size,
-                            "page_elements_batch_size": page_elements_batch_size,
-                            "page_elements_workers": page_elements_actors,
-                            "detect_workers": ocr_actors,
-                            "detect_batch_size": ocr_batch_size,
-                            "ocr_inference_batch_size": ocr_batch_size,
-                            "page_elements_cpus_per_actor": page_elements_cpus_per_actor,
-                            "ocr_cpus_per_actor": ocr_cpus_per_actor,
-                            "gpu_page_elements": page_elements_gpus_per_actor,
-                            "gpu_ocr": ocr_gpus_per_actor,
-                            "gpu_embed": embed_gpus_per_actor,
-                            "nemotron_parse_workers": nemotron_parse_actors,
-                            "gpu_nemotron_parse": nemotron_parse_gpus_per_actor,
-                            "nemotron_parse_batch_size": nemotron_parse_batch_size,
-                        },
-                    )
-                )
-                .embed(
-                    EmbedParams(
-                        model_name=str(embed_model_name),
-                        embed_invoke_url=embed_invoke_url,
-                        embed_modality=embed_modality,
-                        text_elements_modality=text_elements_modality,
-                        structured_elements_modality=structured_elements_modality,
-                        batch_tuning={
-                            "embed_workers": embed_actors,
-                            "embed_batch_size": int(embed_batch_size),
-                            "embed_cpus_per_actor": float(embed_cpus_per_actor),
-                        },
-                    )
-                )
-                .vdb_upload(
-                    VdbUploadParams(
-                        lancedb={
-                            "lancedb_uri": lancedb_uri,
-                            "table_name": LANCEDB_TABLE,
-                            "overwrite": True,
-                            "create_index": True,
-                            "hybrid": hybrid,
-                        }
-                    )
-                )
-            )
+            ingestor = ingestor.files(file_patterns).extract(_extract_params(_pdf_batch_tuning))
         else:
-            ingestor = (
-                ingestor.files(file_patterns)
-                .extract(
-                    ExtractParams(
-                        extract_text=True,
-                        extract_tables=True,
-                        extract_charts=True,
-                        extract_infographics=False,
-                        use_graphic_elements=use_graphic_elements,
-                        graphic_elements_invoke_url=graphic_elements_invoke_url,
-                        inference_batch_size=page_elements_batch_size,
-                        use_table_structure=use_table_structure,
-                        table_output_format=table_output_format,
-                        table_structure_invoke_url=table_structure_invoke_url,
-                        page_elements_invoke_url=page_elements_invoke_url,
-                        ocr_invoke_url=ocr_invoke_url,
-                        batch_tuning={
-                            "debug_run_id": str(runtime_metrics_prefix or "unknown"),
-                            "pdf_extract_workers": pdf_extract_tasks,
-                            "pdf_extract_num_cpus": pdf_extract_cpus_per_task,
-                            "pdf_split_batch_size": pdf_split_batch_size,
-                            "pdf_extract_batch_size": pdf_extract_batch_size,
-                            "page_elements_batch_size": page_elements_batch_size,
-                            "inference_batch_size": page_elements_batch_size,
-                            "page_elements_workers": page_elements_actors,
-                            "detect_workers": ocr_actors,
-                            "detect_batch_size": ocr_batch_size,
-                            "ocr_inference_batch_size": ocr_batch_size,
-                            "page_elements_cpus_per_actor": page_elements_cpus_per_actor,
-                            "ocr_cpus_per_actor": ocr_cpus_per_actor,
-                            "gpu_page_elements": page_elements_gpus_per_actor,
-                            "gpu_ocr": ocr_gpus_per_actor,
-                            "gpu_embed": embed_gpus_per_actor,
-                            "nemotron_parse_workers": nemotron_parse_actors,
-                            "gpu_nemotron_parse": nemotron_parse_gpus_per_actor,
-                            "nemotron_parse_batch_size": nemotron_parse_batch_size,
-                        },
-                    )
-                )
-                .embed(
-                    EmbedParams(
-                        model_name=str(embed_model_name),
-                        embed_invoke_url=embed_invoke_url,
-                        embed_modality=embed_modality,
-                        text_elements_modality=text_elements_modality,
-                        structured_elements_modality=structured_elements_modality,
-                        batch_tuning={
-                            "embed_workers": embed_actors,
-                            "embed_batch_size": int(embed_batch_size),
-                            "embed_cpus_per_actor": float(embed_cpus_per_actor),
-                        },
-                    )
-                )
-                .vdb_upload(
-                    VdbUploadParams(
-                        lancedb={
-                            "lancedb_uri": lancedb_uri,
-                            "table_name": LANCEDB_TABLE,
-                            "overwrite": True,
-                            "create_index": True,
-                            "hybrid": hybrid,
-                        }
-                    )
-                )
+            ingestor = ingestor.files(file_patterns).extract(
+                _extract_params(_pdf_batch_tuning, inference_batch_size=page_elements_batch_size)
             )
+
+        enable_text_chunk = text_chunk or text_chunk_max_tokens is not None or text_chunk_overlap_tokens is not None
+        if enable_text_chunk:
+            ingestor = ingestor.split(_text_chunk_params)
+
+        ingestor = ingestor.embed(embed_params)
 
         logger.info("Running extraction...")
         ingest_start = time.perf_counter()
@@ -732,15 +763,17 @@ def main(
             .materialize()
         )
 
-        if hasattr(ingestor, "_create_lancedb_index"):
-            ingestor._create_lancedb_index()
+        ingestion_only_total_time = time.perf_counter() - ingest_start
 
-        ingest_elapsed_s = time.perf_counter() - ingest_start
-        rows_processed = _count_materialized_rows(ingest_results)
-        logger.info(
-            f"Ingestion complete. {rows_processed} rows procesed in "
-            f"{ingest_elapsed_s:.2f} seconds. {rows_processed/ingest_elapsed_s:.2f} PPS"
-        )
+        # Capture the time it takes to download the Ray dataset to the local machine for reporting.
+        ray_dataset_download_start = time.perf_counter()
+        ingest_local_results = ingest_results.take_all()
+        ray_dataset_download_time = time.perf_counter() - ray_dataset_download_start
+
+        # Write to lancedb and capture the time it takes.
+        lancedb_write_start = time.perf_counter()
+        handle_lancedb(ingest_local_results, lancedb_uri, LANCEDB_TABLE, hybrid=hybrid, mode="overwrite")
+        lancedb_write_time = time.perf_counter() - lancedb_write_start
 
         if isinstance(ingestor, BatchIngestor):
             error_rows = ingestor.get_error_rows(dataset=ingest_results).materialize()
@@ -769,15 +802,19 @@ def main(
                 logger.error(f"Exiting with code 1 due to {error_count} error rows in ingest results.")
                 raise typer.Exit(code=1)
 
-        ray.shutdown()
+        # ---------------------------------------------------------------------------
+        # Evaluation calculation
+        # ---------------------------------------------------------------------------
+        evaluation_label = "Recall"
+        evaluation_total_time = 0.0
+        evaluation_metrics: dict[str, float] = {}
+        evaluation_query_count: Optional[int] = None
 
-        # ---------------------------------------------------------------------------
-        # Recall calculation
-        # ---------------------------------------------------------------------------
-        query_csv = Path(query_csv)
-        if not query_csv.exists():
-            logger.warning(f"Query CSV not found at {query_csv}; skipping recall evaluation.")
-            return
+        if evaluation_mode == "recall":
+            query_csv = Path(query_csv)
+            if not query_csv.exists():
+                logger.warning(f"Query CSV not found at {query_csv}; skipping recall evaluation.")
+                return
 
         db = _lancedb().connect(lancedb_uri)
         table = None
@@ -798,33 +835,88 @@ def main(
             ) from open_err
         try:
             if int(table.count_rows()) == 0:
-                logger.warning(f"LanceDB table {LANCEDB_TABLE!r} exists but is empty; skipping recall evaluation.")
+                logger.warning(
+                    f"LanceDB table {LANCEDB_TABLE!r} exists but is empty; skipping {evaluation_mode} evaluation."
+                )
                 return
         except Exception:
             pass
 
-        # Resolve the HF model ID for recall query embedding so aliases
-        # (e.g. "nemo_retriever_v1") map to the correct model.
-        from nemo_retriever.model import resolve_embed_model
-
         _recall_model = resolve_embed_model(str(embed_model_name))
+        if evaluation_mode == "beir":
+            if not beir_loader:
+                raise ValueError("--beir-loader is required when --evaluation-mode=beir")
+            if not beir_dataset_name:
+                raise ValueError("--beir-dataset-name is required when --evaluation-mode=beir")
 
-        cfg = RecallConfig(
-            lancedb_uri=str(lancedb_uri),
-            lancedb_table=str(LANCEDB_TABLE),
-            embedding_model=_recall_model,
-            embedding_http_endpoint=embed_invoke_url,
-            top_k=10,
-            ks=(1, 5, 10),
-            hybrid=hybrid,
-            match_mode=recall_match_mode,
+            beir_cfg = BeirConfig(
+                lancedb_uri=str(lancedb_uri),
+                lancedb_table=str(LANCEDB_TABLE),
+                embedding_model=_recall_model,
+                loader=str(beir_loader),
+                dataset_name=str(beir_dataset_name),
+                split=str(beir_split),
+                query_language=beir_query_language,
+                doc_id_field=str(beir_doc_id_field),
+                ks=tuple(beir_k) if beir_k else (1, 3, 5, 10),
+                embedding_http_endpoint=embed_invoke_url,
+                embedding_api_key=embed_remote_api_key or "",
+                hybrid=hybrid,
+                reranker=bool(reranker),
+                reranker_model_name=str(reranker_model_name),
+            )
+            evaluation_start = time.perf_counter()
+            beir_dataset, _raw_hits, _run, evaluation_metrics = evaluate_lancedb_beir(beir_cfg)
+            evaluation_total_time = time.perf_counter() - evaluation_start
+            evaluation_label = "BEIR"
+            evaluation_query_count = len(beir_dataset.query_ids)
+        else:
+            recall_cfg = RecallConfig(
+                lancedb_uri=str(lancedb_uri),
+                lancedb_table=str(LANCEDB_TABLE),
+                embedding_model=_recall_model,
+                embedding_http_endpoint=embed_invoke_url,
+                embedding_api_key=embed_remote_api_key or "",
+                top_k=10,
+                ks=(1, 5, 10),
+                hybrid=hybrid,
+                match_mode=recall_match_mode,
+                reranker=reranker_model_name if reranker else None,
+            )
+
+            evaluation_start = time.perf_counter()
+            _df_query, _gold, _raw_hits, _retrieved_keys, evaluation_metrics = retrieve_and_score(
+                query_csv=query_csv,
+                cfg=recall_cfg,
+            )
+            evaluation_total_time = time.perf_counter() - evaluation_start
+            evaluation_query_count = len(_df_query.index)
+
+        total_time = time.perf_counter() - ingest_start
+
+        # This processing has nothing to do with processing or performance so we exclude
+        # it from the runtimes. Just getting row counts for metrics ...
+        num_rows = ingest_results.groupby("source_id").count().count()
+
+        ray.shutdown()
+
+        # Print runtimes for easy user viewing at end
+        print_run_summary(
+            num_rows,
+            input_path,
+            hybrid,
+            lancedb_uri,
+            LANCEDB_TABLE,
+            total_time,
+            ingestion_only_total_time,
+            ray_dataset_download_time,
+            lancedb_write_time,
+            evaluation_total_time,
+            evaluation_metrics,
+            evaluation_label=evaluation_label,
+            evaluation_count=evaluation_query_count,
         )
 
-        _df_query, _gold, _raw_hits, _retrieved_keys, metrics = retrieve_and_score(query_csv=query_csv, cfg=cfg)
-
-        logger.info("\nRecall metrics (matching nemo_retriever.recall.core):")
-        for k, v in metrics.items():
-            logger.info(f"  {k}: {v:.4f}")
     finally:
         # Restore real stdio before closing the mirror file so exception hooks
         # and late flushes never write to a closed stream wrapper.

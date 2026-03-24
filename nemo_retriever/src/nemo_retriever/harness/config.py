@@ -15,7 +15,19 @@ NEMO_RETRIEVER_ROOT = Path(__file__).resolve().parents[3]
 REPO_ROOT = NEMO_RETRIEVER_ROOT.parent
 DEFAULT_TEST_CONFIG_PATH = NEMO_RETRIEVER_ROOT / "harness" / "test_configs.yaml"
 DEFAULT_NIGHTLY_CONFIG_PATH = NEMO_RETRIEVER_ROOT / "harness" / "nightly_config.yaml"
+VALID_EVALUATION_MODES = {"recall", "beir"}
 VALID_RECALL_ADAPTERS = {"none", "page_plus_one", "financebench_json"}
+VALID_BEIR_LOADERS = {"vidore_hf"}
+VALID_BEIR_DOC_ID_FIELDS = {"pdf_basename", "pdf_page", "source_id", "path"}
+VALID_EMBED_MODALITIES = {"text", "image", "text_image"}
+VALID_EMBED_GRANULARITIES = {"element", "page"}
+REMOVED_HARNESS_KEYS = {"image_elements_modality"}
+DEFAULT_NIGHTLY_SLACK_METRIC_KEYS = [
+    "pages",
+    "ingest_secs",
+    "pages_per_sec_ingest",
+    "recall_5",
+]
 
 TUNING_FIELDS = {
     "pdf_extract_workers",
@@ -48,12 +60,23 @@ class HarnessConfig:
     recall_required: bool = True
     recall_match_mode: str = "pdf_page"
     recall_adapter: str = "none"
+    evaluation_mode: str = "recall"
+    beir_loader: str | None = None
+    beir_dataset_name: str | None = None
+    beir_split: str = "test"
+    beir_query_language: str | None = None
+    beir_doc_id_field: str = "pdf_basename"
+    beir_ks: tuple[int, ...] = (1, 3, 5, 10)
 
     artifacts_dir: str | None = None
     ray_address: str | None = None
     lancedb_uri: str = "lancedb"
     hybrid: bool = False
     embed_model_name: str = "nvidia/llama-nemotron-embed-1b-v2"
+    embed_modality: str = "text"
+    embed_granularity: str = "element"
+    extract_page_as_image: bool = True
+    extract_infographics: bool = False
     write_detection_file: bool = False
 
     pdf_extract_workers: int = 8
@@ -83,17 +106,47 @@ class HarnessConfig:
         if self.query_csv is not None and not Path(self.query_csv).exists():
             errors.append(f"query_csv does not exist: {self.query_csv}")
 
-        if self.recall_required and not self.query_csv:
+        if self.evaluation_mode not in VALID_EVALUATION_MODES:
+            errors.append(f"evaluation_mode must be one of {sorted(VALID_EVALUATION_MODES)}")
+
+        if self.evaluation_mode == "recall" and self.recall_required and not self.query_csv:
             errors.append("recall_required=true requires query_csv")
 
         if self.input_type not in {"pdf", "txt", "html", "doc"}:
             errors.append(f"input_type must be one of pdf/txt/html/doc, got '{self.input_type}'")
 
-        if self.recall_match_mode not in {"pdf_page", "pdf_only"}:
-            errors.append("recall_match_mode must be one of pdf_page/pdf_only")
+        if self.evaluation_mode == "recall":
+            if self.recall_match_mode not in {"pdf_page", "pdf_only"}:
+                errors.append("recall_match_mode must be one of pdf_page/pdf_only")
 
-        if self.recall_adapter not in VALID_RECALL_ADAPTERS:
-            errors.append(f"recall_adapter must be one of {sorted(VALID_RECALL_ADAPTERS)}")
+            if self.recall_adapter not in VALID_RECALL_ADAPTERS:
+                errors.append(f"recall_adapter must be one of {sorted(VALID_RECALL_ADAPTERS)}")
+        else:
+            if self.beir_loader not in VALID_BEIR_LOADERS:
+                errors.append(f"beir_loader must be one of {sorted(VALID_BEIR_LOADERS)}")
+            if self.beir_doc_id_field not in VALID_BEIR_DOC_ID_FIELDS:
+                errors.append(f"beir_doc_id_field must be one of {sorted(VALID_BEIR_DOC_ID_FIELDS)}")
+            if not self.beir_split:
+                errors.append("beir_split must be a non-empty string")
+            if self.beir_dataset_name is not None and not str(self.beir_dataset_name).strip():
+                errors.append("beir_dataset_name must be a non-empty string when provided")
+            if not isinstance(self.beir_ks, (list, tuple)) or not self.beir_ks:
+                errors.append("beir_ks must be a non-empty list/tuple of positive integers")
+            else:
+                for k in self.beir_ks:
+                    try:
+                        if int(k) < 1:
+                            errors.append("beir_ks values must be >= 1")
+                            break
+                    except (TypeError, ValueError):
+                        errors.append("beir_ks values must be integers")
+                        break
+
+        if self.embed_modality not in VALID_EMBED_MODALITIES:
+            errors.append(f"embed_modality must be one of {sorted(VALID_EMBED_MODALITIES)}")
+
+        if self.embed_granularity not in VALID_EMBED_GRANULARITIES:
+            errors.append(f"embed_granularity must be one of {sorted(VALID_EMBED_GRANULARITIES)}")
 
         for name in TUNING_FIELDS:
             val = getattr(self, name)
@@ -186,6 +239,9 @@ def _resolve_query_csv_path(value: str | None, *, config_path: Path) -> str | No
 
 
 def _apply_env_overrides(config_dict: dict[str, Any]) -> None:
+    if os.getenv("HARNESS_IMAGE_ELEMENTS_MODALITY") not in {None, ""}:
+        raise ValueError("image_elements_modality is no longer supported by the harness; use embed_modality instead")
+
     env_map: dict[str, tuple[str, Any]] = {
         "HARNESS_DATASET": ("dataset", str),
         "HARNESS_DATASET_DIR": ("dataset_dir", str),
@@ -195,11 +251,21 @@ def _apply_env_overrides(config_dict: dict[str, Any]) -> None:
         "HARNESS_RECALL_REQUIRED": ("recall_required", _parse_bool),
         "HARNESS_RECALL_MATCH_MODE": ("recall_match_mode", str),
         "HARNESS_RECALL_ADAPTER": ("recall_adapter", str),
+        "HARNESS_EVALUATION_MODE": ("evaluation_mode", str),
+        "HARNESS_BEIR_LOADER": ("beir_loader", str),
+        "HARNESS_BEIR_DATASET_NAME": ("beir_dataset_name", str),
+        "HARNESS_BEIR_SPLIT": ("beir_split", str),
+        "HARNESS_BEIR_QUERY_LANGUAGE": ("beir_query_language", str),
+        "HARNESS_BEIR_DOC_ID_FIELD": ("beir_doc_id_field", str),
         "HARNESS_ARTIFACTS_DIR": ("artifacts_dir", str),
         "HARNESS_RAY_ADDRESS": ("ray_address", str),
         "HARNESS_LANCEDB_URI": ("lancedb_uri", str),
         "HARNESS_HYBRID": ("hybrid", _parse_bool),
         "HARNESS_EMBED_MODEL_NAME": ("embed_model_name", str),
+        "HARNESS_EMBED_MODALITY": ("embed_modality", str),
+        "HARNESS_EMBED_GRANULARITY": ("embed_granularity", str),
+        "HARNESS_EXTRACT_PAGE_AS_IMAGE": ("extract_page_as_image", _parse_bool),
+        "HARNESS_EXTRACT_INFOGRAPHICS": ("extract_infographics", _parse_bool),
         "HARNESS_WRITE_DETECTION_FILE": ("write_detection_file", _parse_bool),
     }
 
@@ -223,6 +289,8 @@ def _parse_cli_overrides(overrides: list[str] | None) -> dict[str, Any]:
         raw_val = raw_val.strip()
         if not key:
             raise ValueError(f"Invalid override key in: {item}")
+        if key in REMOVED_HARNESS_KEYS:
+            raise ValueError(f"{key} is no longer supported by the harness; use embed_modality instead")
 
         low = raw_val.lower()
         if low in {"true", "false"}:
@@ -308,6 +376,11 @@ def load_harness_config(
 
     merged["dataset_label"] = dataset_label or Path(str(merged["dataset_dir"])).name
     merged["preset"] = str(merged.get("preset") or "single_gpu")
+    if merged.get("evaluation_mode") == "beir" and merged.get("beir_dataset_name") is None:
+        merged["beir_dataset_name"] = merged["dataset_label"]
+    for removed_key in sorted(REMOVED_HARNESS_KEYS):
+        if removed_key in merged:
+            raise ValueError(f"{removed_key} is no longer supported by the harness; use embed_modality instead")
 
     if "query_csv" not in merged:
         merged["query_csv"] = None
@@ -319,9 +392,7 @@ def load_harness_config(
     return cfg
 
 
-def load_runs_config(config_file: str | None = None) -> list[dict[str, Any]]:
-    config_path = _resolve_config_path(config_file, DEFAULT_NIGHTLY_CONFIG_PATH)
-    yaml_cfg = _read_yaml_mapping(config_path)
+def _load_nightly_runs_from_mapping(yaml_cfg: dict[str, Any], config_path: Path) -> list[dict[str, Any]]:
     runs = yaml_cfg.get("runs", [])
     if not isinstance(runs, list):
         raise ValueError(f"'runs' must be a list in {config_path}")
@@ -333,3 +404,55 @@ def load_runs_config(config_file: str | None = None) -> list[dict[str, Any]]:
             raise ValueError(f"Run entry at index {idx} missing required key: dataset")
         normalized.append(dict(run))
     return normalized
+
+
+def _normalize_nightly_slack_config(raw_cfg: Any, config_path: Path) -> dict[str, Any]:
+    if raw_cfg is None:
+        raw_cfg = {}
+    if not isinstance(raw_cfg, dict):
+        raise ValueError(f"'slack' must be a mapping in {config_path}")
+
+    metric_keys = raw_cfg.get("metric_keys")
+    if metric_keys is None:
+        normalized_metric_keys = list(DEFAULT_NIGHTLY_SLACK_METRIC_KEYS)
+    else:
+        if not isinstance(metric_keys, list) or any(
+            not isinstance(item, str) or not item.strip() for item in metric_keys
+        ):
+            raise ValueError(f"'slack.metric_keys' must be a list of non-empty strings in {config_path}")
+        normalized_metric_keys = [item.strip() for item in metric_keys]
+
+    title = raw_cfg.get("title")
+    if title is None:
+        normalized_title = "nemo_retriever Nightly Harness"
+    else:
+        normalized_title = str(title).strip()
+        if not normalized_title:
+            raise ValueError(f"'slack.title' must be a non-empty string in {config_path}")
+
+    return {
+        "enabled": bool(raw_cfg.get("enabled", True)),
+        "title": normalized_title,
+        "post_artifact_paths": bool(raw_cfg.get("post_artifact_paths", True)),
+        "metric_keys": normalized_metric_keys,
+    }
+
+
+def load_nightly_config(config_file: str | None = None) -> dict[str, Any]:
+    config_path = _resolve_config_path(config_file, DEFAULT_NIGHTLY_CONFIG_PATH)
+    yaml_cfg = _read_yaml_mapping(config_path)
+    preset = yaml_cfg.get("preset")
+    if preset is not None:
+        preset = str(preset).strip()
+        if not preset:
+            raise ValueError(f"'preset' must be a non-empty string in {config_path}")
+    return {
+        "config_path": str(config_path.resolve()),
+        "preset": preset,
+        "runs": _load_nightly_runs_from_mapping(yaml_cfg, config_path),
+        "slack": _normalize_nightly_slack_config(yaml_cfg.get("slack", {}), config_path),
+    }
+
+
+def load_runs_config(config_file: str | None = None) -> list[dict[str, Any]]:
+    return load_nightly_config(config_file)["runs"]
