@@ -42,8 +42,8 @@ class DuckDB:
         Open the database in read-only mode (default: False).
     """
 
-    def __init__(self, connection: Optional[Dict[str, Any]] = None) -> None:
-        self.connection_properties = connection or {}
+    def __init__(self, connection: Dict[str, Any]) -> None:
+        self.connection_properties = connection
         db_path = self.connection_properties.get("database", ":memory:")
         read_only = self.connection_properties.get("read_only", False)
         self.conn = duckdb.connect(database=db_path, read_only=read_only)
