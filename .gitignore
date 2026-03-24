@@ -263,6 +263,12 @@ nemo_retriever/run_results/
 
 
 # Batch-generated SQL (debug_retriever_sql --batch output)
-nemo_retriever/src/nemo_retriever/relational_db/generate_sql/generated_sql/
+nemo_retriever/src/nemo_retriever/relational_db/benchmark/sql_tool/generated_sql/
 
-nemo_retriever/src/nemo_retriever/relational_db/generate_sql/spider2-lite.jsonl
+nemo_retriever/src/nemo_retriever/relational_db/benchmark/sql_tool/spider2-lite.jsonl
+
+nemo_retriever/src/nemo_retriever/relational_db/benchmark/deep_agent/generated_sql/
+
+.env.example
+
+scripts/inspect_lancedb.py
