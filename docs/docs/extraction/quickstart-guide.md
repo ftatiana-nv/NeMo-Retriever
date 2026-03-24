@@ -82,6 +82,12 @@ h. Run the command `docker ps`. You should see output similar to the following. 
 
     ```
     CONTAINER ID  IMAGE                                            COMMAND                 CREATED         STATUS                  PORTS            NAMES
+    ...
+    ```
+
+To run the NeMo Retriever Library Python client from your host machine, **Python 3.12 or later is required**. Create a virtual environment and install the client packages:
+
+```shell
 uv venv --python 3.12 nv-ingest-dev
 source nv-ingest-dev/bin/activate
 uv pip install nv-ingest==26.1.2 nv-ingest-api==26.1.2 nv-ingest-client==26.1.2
@@ -89,7 +95,7 @@ uv pip install nv-ingest==26.1.2 nv-ingest-api==26.1.2 nv-ingest-client==26.1.2
 
 !!! tip
 
-    To confirm that you have activated your Conda environment, run `which pip` and `which python`, and confirm that you see `nemo_retriever` in the result. You can do this before any pip or python command that you run.
+    To confirm that you have activated your virtual environment, run `which pip` and `which python`, and confirm that you see `nemo_retriever` or your venv path in the result. You can do this before any pip or python command that you run.
 
 
 !!! note
@@ -112,7 +118,7 @@ Because many service URIs default to localhost, running inside the `nemo-retriev
 
 ## Step 3: Ingest Documents
 
-You can submit jobs programmatically in Python or using the [NeMo Retriever CLI](cli-reference.md).
+You can submit jobs programmatically in Python or using the [NeMo Retriever Library CLI](cli-reference.md).
 
 The following examples demonstrate how to extract text, charts, tables, and images:
 
@@ -126,13 +132,13 @@ The following examples demonstrate how to extract text, charts, tables, and imag
 
 !!! tip
 
-    For more Python examples, refer to [NeMo Retriever: Python Client Quick Start Guide](https://github.com/NVIDIA/NeMo-Retriever/blob/main/client/client_examples/examples/python_client_usage.ipynb).
+    For more Python examples, refer to [NeMo Retriever Library: Python Client Quick Start Guide](https://github.com/NVIDIA/NeMo-Retriever/blob/main/client/client_examples/examples/python_client_usage.ipynb).
 
 <a id="ingest_python_example"></a>
 ```python
 import logging, os, time
-from nemo_retriever.client import Ingestor, NemoRetrieverClient
-from nemo_retriever.util.process_json_files import ingest_json_results_to_blob
+from nv_ingest_client.client import Ingestor, NemoRetrieverClient
+from nv_ingest_client.util.process_json_files import ingest_json_results_to_blob
 client = NemoRetrieverClient(                                                                         
     message_client_port=7670,                                                               
     message_client_hostname="localhost"        
@@ -386,7 +392,7 @@ python src/util/image_viewer.py --file_path ./processed_docs/image/multimodal_te
 
 !!! tip
 
-    Beyond inspecting the results, you can read them into things like [llama-index](https://github.com/NVIDIA/NeMo-Retriever/blob/main/examples/llama_index_multimodal_rag.ipynb) or [langchain](https://github.com/NVIDIA/NeMo-Retriever/blob/main/examples/langchain_multimodal_rag.ipynb) retrieval pipelines. Also, checkout our [Enterprise RAG Blueprint on build.nvidia.com](https://build.nvidia.com/nvidia/multimodal-pdf-data-extraction-for-enterprise-rag) to query over document content pre-extracted with NeMo Retriever.
+    Beyond inspecting the results, you can read them into things like [llama-index](https://github.com/NVIDIA/NeMo-Retriever/blob/main/examples/llama_index_multimodal_rag.ipynb) or [langchain](https://github.com/NVIDIA/NeMo-Retriever/blob/main/examples/langchain_multimodal_rag.ipynb) retrieval pipelines. Also, checkout our [Enterprise RAG Blueprint on build.nvidia.com](https://build.nvidia.com/nvidia/multimodal-pdf-data-extraction-for-enterprise-rag) to query over document content pre-extracted with NeMo Retriever Library.
 
 
 
@@ -459,7 +465,7 @@ docker compose \
 
 ## Specify MIG slices for NIM models
 
-When you deploy NeMo Retriever with NIM models on MIG‑enabled GPUs, MIG device slices are requested and scheduled through the `values.yaml` file for the corresponding NIM microservice. For IBM Content-Aware Storage (CAS) deployments, this allows NeMo Retriever NIM pods to land only on nodes that expose the desired MIG profiles [raw.githubusercontent](https://raw.githubusercontent.com/NVIDIA/NeMo-Retriever/main/helm/README.md%E2%80%8B).​
+When you deploy NeMo Retriever Library with NIM models on MIG‑enabled GPUs, MIG device slices are requested and scheduled through the `values.yaml` file for the corresponding NIM microservice. For IBM Content-Aware Storage (CAS) deployments, this allows NeMo Retriever Library NIM pods to land only on nodes that expose the desired MIG profiles [raw.githubusercontent](https://raw.githubusercontent.com/NVIDIA/NeMo-Retriever/main/helm/README.md).​
 
 To target a specific MIG profile—for example, a 3g.20gb slice on an A100, which is a hardware-partitioned virtual GPU instance that gives your workload a fixed mid-sized share of the A100’s compute plus 20 GB of dedicated GPU memory and behaves like a smaller independent GPU—for a given NIM, configure the `resources` and `nodeSelector` under that NIM’s values path in `values.yaml`.
 
@@ -482,7 +488,7 @@ Key points:
 * Use the appropriate NIM‑specific values path (for example, `nemo_retriever.nvidiaNim.nemoretrieverPageElements.resources`) rather than the generic `nemo_retriever.nim` placeholder.
 * Set `resources.requests` and `resources.limits` to the desired MIG resource name (for example, `nvidia.com/mig-3g.20gb`).
 * Use `nodeSelector` (or tolerations/affinity, if you prefer) to target nodes labeled with the corresponding MIG‑enabled GPU product (for example, `nvidia.com/gpu.product: A100-SXM4-40GB-MIG-3g.20gb`).
-This syntax and structure can be repeated for each NIM model used by CAS, ensuring that each NeMo Retriever NIM pod is mapped to the correct MIG slice type and scheduled onto compatible nodes.
+This syntax and structure can be repeated for each NIM model used by CAS, ensuring that each NeMo Retriever Library NIM pod is mapped to the correct MIG slice type and scheduled onto compatible nodes.
 
 !!! important
 

@@ -31,12 +31,14 @@ from nemo_retriever.table.table_detection import TableStructureActor
 from nemo_retriever.pdf.extract import PDFExtractionActor
 from nemo_retriever.pdf.split import PDFSplitActor
 from nemo_retriever.utils.hf_cache import resolve_hf_cache_dir
+from nemo_retriever.utils.remote_auth import resolve_remote_api_key
 from nemo_retriever.utils.ray_resource_hueristics import (
     gather_cluster_resources,
     resolve_requested_plan,
 )
 from nemo_retriever.ingest_modes.inprocess import collapse_content_to_page_rows, explode_content_to_rows
 
+from ..image.load import SUPPORTED_IMAGE_EXTENSIONS
 from ..ingestor import Ingestor
 from ..params import ASRParams
 from ..params import AudioChunkParams
@@ -45,14 +47,14 @@ from ..params import ExtractParams
 from ..params import HtmlChunkParams
 from ..params import IngestExecuteParams
 from ..params import PdfSplitParams
-from ..params import StructuredDescriptionParams
-from ..params import StructuredExtractParams
-from ..params import StructuredFetchParams
-from ..params import StructuredSemanticLayerParams
-from ..params import StructuredUsageWeightsParams
+from ..params import TabularDescriptionParams
+from ..params import TabularExtractParams
+from ..params import TabularFetchParams
+from ..params import TabularSemanticLayerParams
+from ..params import TabularUsageWeightsParams
 from ..params import TextChunkParams
 from ..params import VdbUploadParams
-from ..relational_db.neo4j_connection import get_neo4j_conn
+from ..tabular_data.neo4j import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 
@@ -262,9 +264,9 @@ class BatchIngestor(Ingestor):
         self._extract_txt_kwargs: Dict[str, Any] = {}  # noqa: F821
         self._extract_html_kwargs: Dict[str, Any] = {}  # noqa: F821
         self._use_nemotron_parse_only: bool = False
-        # Stored params for the structured ingest path (no Ray Dataset needed).
-        self._structured_embed_params: Optional[EmbedParams] = None
-        self._structured_vdb_params: Optional[VdbUploadParams] = None
+        # Stored params for the tabular ingest path (no Ray Dataset needed).
+        self._tabular_embed_params: Optional[EmbedParams] = None
+        self._tabular_vdb_params: Optional[VdbUploadParams] = None
 
     def files(self, documents: Union[str, List[str]]) -> "BatchIngestor":
         """
@@ -307,6 +309,9 @@ class BatchIngestor(Ingestor):
         This does not run extraction yet; it records configuration so the batch
         executor can build a concrete pipeline later.
 
+        If all input files have a ``.txt`` extension, the pipeline automatically
+        delegates to :meth:`extract_txt` with default :class:`TextChunkParams`.
+
         Resource-tuning kwargs (auto-detected from available resources if omitted):
 
         - ``pdf_split_batch_size``: Batch size for PDF split stage (default 1).
@@ -320,7 +325,33 @@ class BatchIngestor(Ingestor):
         - ``ocr_cpus_per_actor``: CPUs reserved per OCR actor (default 1).
         """
 
+        if self._input_documents and all(f.lower().endswith(".txt") for f in self._input_documents):
+            txt_params = TextChunkParams(
+                max_tokens=kwargs.pop("max_tokens", 1024),
+                overlap_tokens=kwargs.pop("overlap_tokens", 0),
+            )
+            return self.extract_txt(params=txt_params)
+
+        if self._input_documents and all(
+            os.path.splitext(f)[1].lower() in SUPPORTED_IMAGE_EXTENSIONS for f in self._input_documents
+        ):
+            return self.extract_image_files(params=params, **kwargs)
+
         resolved = _coerce_params(params, ExtractParams, kwargs)
+        if (
+            any(
+                (
+                    resolved.invoke_url,
+                    resolved.page_elements_invoke_url,
+                    resolved.ocr_invoke_url,
+                    resolved.graphic_elements_invoke_url,
+                    resolved.table_structure_invoke_url,
+                )
+            )
+            and not resolved.api_key
+        ):
+            resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
+
         kwargs = {
             **resolved.model_dump(mode="python", exclude={"remote_retry", "batch_tuning"}, exclude_none=True),
             **resolved.remote_retry.model_dump(mode="python", exclude_none=True),
@@ -340,38 +371,13 @@ class BatchIngestor(Ingestor):
 
         # 200 DPI is sufficient for both detection and OCR.  YOLOX resizes to
         # 1024x1024 internally, and NemotronOCR also resizes crops to 1024x1024,
-        # so resolution above ~1200px per side is wasted.  200 DPI (Letter =
-        # 1700x2200) gives enough detail while reducing extraction time and
-        # memory usage by ~30-40% vs 300 DPI.
-        kwargs.setdefault("dpi", 200)
-
+        # nv-ingest NIM uses 300 DPI for page-element detection; match that
+        # default here so local-model recall matches the container path.
+        kwargs.setdefault("dpi", 300)
+        kwargs.setdefault("image_format", "jpeg")
+        kwargs.setdefault("jpeg_quality", 100)
         self._pipeline_type = "pdf"
         self._tasks.append(("extract", dict(kwargs)))
-
-        # Stage-specific kwargs: upstream PDF stages accept many options (dpi, extract_*),
-        # but downstream detect_* Ray actors accept only a small set. Passing the whole
-        # dict can cause TypeErrors (e.g. unexpected `method=`).
-        detect_passthrough_keys = {
-            "inference_batch_size",
-            "output_column",
-            "num_detections_column",
-            "counts_by_label_column",
-            "api_key",
-            "request_timeout_s",
-            "remote_max_pool_workers",
-            "remote_max_retries",
-            "remote_max_429_retries",
-        }
-        detect_kwargs = {k: kwargs[k] for k in detect_passthrough_keys if k in kwargs}
-        page_elements_invoke_url = kwargs.get("page_elements_invoke_url", kwargs.get("invoke_url"))
-        if page_elements_invoke_url:
-            detect_kwargs["invoke_url"] = page_elements_invoke_url
-        if "page_elements_request_timeout_s" in kwargs:
-            detect_kwargs["request_timeout_s"] = kwargs["page_elements_request_timeout_s"]
-        if "page_elements_api_key" in kwargs:
-            detect_kwargs["api_key"] = kwargs["page_elements_api_key"]
-
-        detect_kwargs["inference_batch_size"] = self._requested_plan.get_page_elements_batch_size()
 
         # Convert DOCX/PPTX to PDF before splitting.  CPU-only, one
         # LibreOffice process per file (batch_size=1).
@@ -406,6 +412,67 @@ class BatchIngestor(Ingestor):
             num_cpus=self._requested_plan.get_pdf_extract_cpus_per_task(),
             compute=rd.TaskPoolStrategy(size=self._requested_plan.get_pdf_extract_tasks()),
         )
+
+        self._apply_nemotron_parse_overrides(kwargs)
+
+        self._append_detection_stages(kwargs)
+
+        return self
+
+    def _apply_nemotron_parse_overrides(self, kwargs: dict[str, Any]) -> None:
+        """Update ``_requested_plan`` with user-provided Nemotron Parse resource overrides
+        and set ``_use_nemotron_parse_only``."""
+        nemotron_parse_workers = float(kwargs.get("nemotron_parse_workers", 0.0) or 0.0)
+        gpu_nemotron_parse = float(kwargs.get("gpu_nemotron_parse", 0.0) or 0.0)
+        nemotron_parse_batch_size = float(kwargs.get("nemotron_parse_batch_size", 0.0) or 0.0)
+        self._use_nemotron_parse_only = kwargs.get("method") == "nemotron_parse" or (
+            nemotron_parse_workers > 0.0 and gpu_nemotron_parse > 0.0 and nemotron_parse_batch_size > 0.0
+        )
+
+        # Forward CLI overrides into the RequestedPlan so that downstream Ray
+        # actor pools (batch size, GPU fraction, pool size) honour them.
+        overrides: dict[str, Any] = {}
+        if nemotron_parse_workers > 0.0:
+            workers = int(nemotron_parse_workers)
+            overrides["nemotron_parse_initial_actors"] = workers
+            overrides["nemotron_parse_min_actors"] = workers
+            overrides["nemotron_parse_max_actors"] = workers
+        if gpu_nemotron_parse > 0.0:
+            overrides["nemotron_parse_gpus_per_actor"] = gpu_nemotron_parse
+        if nemotron_parse_batch_size > 0.0:
+            overrides["nemotron_parse_batch_size"] = int(nemotron_parse_batch_size)
+        if overrides:
+            self._requested_plan = self._requested_plan.model_copy(update=overrides)
+
+    def _append_detection_stages(self, kwargs: dict[str, Any]) -> None:
+        """Append downstream GPU detection stages (page elements, OCR, table/chart/infographic).
+
+        Shared by ``extract()`` (PDF) and ``extract_image_files()`` (standalone images).
+        """
+        # Stage-specific kwargs: upstream PDF stages accept many options (dpi, extract_*),
+        # but downstream detect_* Ray actors accept only a small set. Passing the whole
+        # dict can cause TypeErrors (e.g. unexpected `method=`).
+        detect_passthrough_keys = {
+            "inference_batch_size",
+            "output_column",
+            "num_detections_column",
+            "counts_by_label_column",
+            "api_key",
+            "request_timeout_s",
+            "remote_max_pool_workers",
+            "remote_max_retries",
+            "remote_max_429_retries",
+        }
+        detect_kwargs = {k: kwargs[k] for k in detect_passthrough_keys if k in kwargs}
+        page_elements_invoke_url = kwargs.get("page_elements_invoke_url", kwargs.get("invoke_url"))
+        if page_elements_invoke_url:
+            detect_kwargs["invoke_url"] = page_elements_invoke_url
+        if "page_elements_request_timeout_s" in kwargs:
+            detect_kwargs["request_timeout_s"] = kwargs["page_elements_request_timeout_s"]
+        if "page_elements_api_key" in kwargs:
+            detect_kwargs["api_key"] = kwargs["page_elements_api_key"]
+
+        detect_kwargs["inference_batch_size"] = self._requested_plan.get_page_elements_batch_size()
 
         # In further stages we don't prefer individual rows as batching is more performant.
         # Here we set the target number of rows per block to either
@@ -561,6 +628,9 @@ class BatchIngestor(Ingestor):
             # When use_table_structure is True, tables are handled above;
             # charts/infographics still go through OCR.
             ocr_flags = {}
+            method = kwargs.get("method", "pdfium")
+            if method in ("pdfium_hybrid", "ocr") and kwargs.get("extract_text") is True:
+                ocr_flags["extract_text"] = True
             if kwargs.get("extract_tables") is True and not use_table_structure:
                 ocr_flags["extract_tables"] = True
             if kwargs.get("extract_charts") is True and not use_graphic_elements:
@@ -600,6 +670,72 @@ class BatchIngestor(Ingestor):
                     fn_constructor_kwargs=ocr_flags,
                 )
 
+    def extract_image_files(self, params: ExtractParams | None = None, **kwargs: Any) -> "BatchIngestor":
+        """
+        Configure image-only pipeline: read_binary_files -> ImageLoadActor -> detection stages.
+
+        Use with .files("*.png").extract_image_files(...).embed().vdb_upload().ingest().
+        Do not call .extract() when using .extract_image_files().
+        """
+        from nemo_retriever.image.ray_data import ImageLoadActor
+
+        resolved = _coerce_params(params, ExtractParams, kwargs)
+        if (
+            any(
+                (
+                    resolved.invoke_url,
+                    resolved.page_elements_invoke_url,
+                    resolved.ocr_invoke_url,
+                    resolved.graphic_elements_invoke_url,
+                    resolved.table_structure_invoke_url,
+                )
+            )
+            and not resolved.api_key
+        ):
+            resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
+
+        kwargs = {
+            **resolved.model_dump(mode="python", exclude={"remote_retry", "batch_tuning"}, exclude_none=True),
+            **resolved.remote_retry.model_dump(mode="python", exclude_none=True),
+            **resolved.batch_tuning.model_dump(mode="python", exclude_none=True),
+        }
+
+        self._pipeline_type = "image"
+        self._tasks.append(("extract_image_files", dict(kwargs)))
+
+        # Image loading: bytes+path -> page DataFrame (CPU-only, like TxtSplitActor).
+        self._rd_dataset = self._rd_dataset.map_batches(
+            ImageLoadActor,
+            batch_size=4,
+            batch_format="pandas",
+            num_cpus=1,
+        )
+
+        # Downstream detection stages (page elements, OCR, table/chart/infographic).
+        self._apply_nemotron_parse_overrides(kwargs)
+        self._append_detection_stages(kwargs)
+
+        return self
+
+    def split(self, params: TextChunkParams | None = None, **kwargs: Any) -> "BatchIngestor":
+        """
+        Re-chunk the ``text`` column by token count (post-extraction transform).
+
+        Adds a ``map_batches(TextChunkActor, ...)`` stage to the Ray Dataset so
+        already-extracted text is re-chunked before embedding.
+        """
+        from nemo_retriever.txt.ray_data import TextChunkActor
+
+        resolved = _coerce_params(params, TextChunkParams, kwargs)
+        self._tasks.append(("split", resolved.model_dump(mode="python")))
+
+        self._rd_dataset = self._rd_dataset.map_batches(
+            TextChunkActor,
+            batch_size=4,
+            batch_format="pandas",
+            num_cpus=1,
+            fn_constructor_kwargs={"params": resolved},
+        )
         return self
 
     def extract_txt(self, params: TextChunkParams | None = None, **kwargs: Any) -> "BatchIngestor":
@@ -660,6 +796,8 @@ class BatchIngestor(Ingestor):
         Use with .files("mp3/*.mp3").extract_audio(...).embed().vdb_upload().ingest().
         Do not call .extract() when using .extract_audio().
         ASR requires a remote or self-deployed Parakeet/Riva gRPC endpoint (see ASRParams.audio_endpoints).
+        Optional kwargs: audio_chunk_batch_size (default 4), asr_batch_size (default 8),
+        asr_num_gpus (default 0.5; GPUs reserved per ASR actor for local Parakeet).
         """
         from nemo_retriever.audio import ASRActor
         from nemo_retriever.audio import MediaChunkActor
@@ -675,6 +813,7 @@ class BatchIngestor(Ingestor):
 
         audio_chunk_batch_size = kwargs.get("audio_chunk_batch_size", 4)
         asr_batch_size = kwargs.get("asr_batch_size", 8)
+        asr_num_gpus = kwargs.get("asr_num_gpus", 0.5)
 
         self._rd_dataset = self._rd_dataset.map_batches(
             MediaChunkActor,
@@ -688,6 +827,7 @@ class BatchIngestor(Ingestor):
             batch_size=asr_batch_size,
             batch_format="pandas",
             num_cpus=1,
+            num_gpus=asr_num_gpus,
             fn_constructor_kwargs={"params": ASRParams(**self._extract_audio_asr_kwargs)},
         )
         return self
@@ -722,12 +862,16 @@ class BatchIngestor(Ingestor):
         from nemo_retriever.params.utils import build_embed_kwargs
 
         resolved = _coerce_params(params, EmbedParams, kwargs)
-        # Always save params so ingest_structured can use them without a Ray Dataset.
-        self._structured_embed_params = resolved
+        # Always save params so ingest_tabular can use them without a Ray Dataset.
+        self._tabular_embed_params = resolved
 
         if self._rd_dataset is None:
-            # Structured-only mode: no Ray Dataset to configure; params stored above.
+            # Tabular-only mode: no Ray Dataset to configure; params stored above.
             return self
+
+        if any((resolved.embedding_endpoint, resolved.embed_invoke_url)) and not resolved.api_key:
+            resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
+
         kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
 
         # Remaining kwargs are forwarded to the actor constructor.
@@ -803,15 +947,15 @@ class BatchIngestor(Ingestor):
             if "purge_results_after_upload" in kwargs:
                 p = p.model_copy(update={"purge_results_after_upload": bool(kwargs["purge_results_after_upload"])})
         _ = p.purge_results_after_upload
-        # Always save params so ingest_structured can use them without a Ray Dataset.
-        self._structured_vdb_params = p
+        # Always save params so ingest_tabular can use them without a Ray Dataset.
+        self._tabular_vdb_params = p
 
         vdb_kwargs = p.lancedb.model_dump(mode="python")
         self._tasks.append(("vdb_upload", dict(vdb_kwargs)))
         self._vdb_upload_kwargs = dict(vdb_kwargs)
 
         if self._rd_dataset is None:
-            # Structured-only mode: no Ray Dataset to configure; params stored above.
+            # Tabular-only mode: no Ray Dataset to configure; params stored above.
             return self
 
         # Streaming write stage — single actor, CPU-only, no GPU needed.
@@ -1033,68 +1177,68 @@ class BatchIngestor(Ingestor):
         print(f"Wrote {n_vecs} rows to LanceDB uri={lancedb_uri!r} table={table_name!r}")
 
     # ------------------------------------------------------------------
-    # Structured (database) ingestion
+    # Tabular (database) ingestion
     # ------------------------------------------------------------------
 
-    def pull_structured_db_entities(
+    def pull_tabular_db_entities(
         self,
-        params: StructuredExtractParams | None = None,
+        params: TabularExtractParams | None = None,
     ) -> dict:
         """Step 1 — Pull schema entities from the relational DB into a data dict."""
-        from ..relational_db.extract_data import extract_relational_db_data
+        from ..tabular_data.ingestion.extract_data import extract_relational_db_data
 
         return extract_relational_db_data(params=params)
 
-    def store_structured_in_neo4j(
+    def store_tabular_in_neo4j(
         self,
         data: dict,
         neo4j_conn: Any = None,
     ) -> "BatchIngestor":
         """Step 2 — Write the extracted data dict as graph nodes into Neo4j."""
-        from ..relational_db.extract_data import store_relational_db_in_neo4j
+        from ..tabular_data.ingestion.extract_data import store_relational_db_in_neo4j
 
         store_relational_db_in_neo4j(data=data, neo4j_conn=neo4j_conn)
         return self
 
-    def populate_structured_semantic_layer(
+    def populate_tabular_semantic_layer(
         self,
-        params: StructuredSemanticLayerParams | None = None,
+        params: TabularSemanticLayerParams | None = None,
         neo4j_conn: Any = None,
     ) -> "BatchIngestor":
         """Step 3 — Map global business terms/attributes to graph entities."""
         pass
 
-    def populate_structured_usage_weights(
+    def populate_tabular_usage_weights(
         self,
-        params: StructuredUsageWeightsParams | None = None,
+        params: TabularUsageWeightsParams | None = None,
         neo4j_conn: Any = None,
     ) -> "BatchIngestor":
         """Step 4 — Derive usage weights from query log files."""
         pass
 
-    def generate_structured_descriptions(
+    def generate_tabular_descriptions(
         self,
-        params: StructuredDescriptionParams | None = None,
+        params: TabularDescriptionParams | None = None,
         neo4j_conn: Any = None,
     ) -> "BatchIngestor":
         """Step 5 — LLM-generate natural-language descriptions for all node types."""
         pass
 
-    def get_structured_metadata_for_embedding(
+    def get_tabular_metadata_for_embedding(
         self,
-        params: StructuredFetchParams | None = None,
+        params: TabularFetchParams | None = None,
         neo4j_conn: Any = None,
     ) -> "rd.Dataset | None":
         """Step 6 — Fetch entity descriptions from Neo4j and return a Ray Dataset.
 
         Converts the result directly to a Ray Dataset (via rd.from_pandas) so
-        ingest_structured can feed it straight into the batch actor pipeline
+        ingest_tabular can feed it straight into the batch actor pipeline
         without an intermediate pandas conversion step.
 
         Columns: text, _embed_modality, path, page_number, metadata —
         matching the unstructured pipeline row format.
         """
-        from ..relational_db.prepare_for_embedding.prepare_embedding_text import (
+        from ..tabular_data.ingestion.prepare_for_embedding.prepare_embedding_text import (
             fetch_relational_db_for_embedding,
             neo4j_tables_result_to_embedding_dataframe,
         )
@@ -1105,11 +1249,11 @@ class BatchIngestor(Ingestor):
         df = neo4j_tables_result_to_embedding_dataframe(docs)
         return rd.from_pandas(df)
 
-    def ingest_structured(
+    def ingest_tabular(
         self,
-        params: StructuredExtractParams | None = None,
+        params: TabularExtractParams | None = None,
     ) -> Any:
-        """Orchestrate the full structured ingestion pipeline.
+        """Orchestrate the full tabular ingestion pipeline.
 
         Acquires the shared Neo4j connection once and passes it to every step.
         After building the embedding DataFrame from Neo4j, converts it to a
@@ -1117,33 +1261,33 @@ class BatchIngestor(Ingestor):
         pipeline (_BatchEmbedActor, _LanceDBWriteActor).
 
         Steps:
-        1. pull_structured_db_entities         → pull schema entities from the DB
-        2. store_structured_in_neo4j           → write entities as graph nodes to Neo4j
-        3. populate_structured_semantic_layer
-        4. populate_structured_usage_weights
-        5. generate_structured_descriptions
-        6. get_structured_metadata_for_embedding → Ray Dataset
-        7. _BatchEmbedActor                    → GPU batch embedding (same as unstructured)
-        8. _LanceDBWriteActor                  → streaming upload to "nv-ingest-structured"
+        1. pull_tabular_db_entities         → pull schema entities from the DB
+        2. store_tabular_in_neo4j           → write entities as graph nodes to Neo4j
+        3. populate_tabular_semantic_layer
+        4. populate_tabular_usage_weights
+        5. generate_tabular_descriptions
+        6. get_tabular_metadata_for_embedding → Ray Dataset
+        7. _BatchEmbedActor                 → GPU batch embedding (same as unstructured)
+        8. _LanceDBWriteActor               → streaming upload to "nv-ingest-tabular"
         """
         neo4j_conn = get_neo4j_conn()
 
-        data = self.pull_structured_db_entities(params=params)
-        self.store_structured_in_neo4j(data=data, neo4j_conn=neo4j_conn)
+        data = self.pull_tabular_db_entities(params=params)
+        self.store_tabular_in_neo4j(data=data, neo4j_conn=neo4j_conn)
 
-        self.populate_structured_semantic_layer(neo4j_conn=neo4j_conn)
-        self.populate_structured_usage_weights(neo4j_conn=neo4j_conn)
-        self.generate_structured_descriptions(neo4j_conn=neo4j_conn)
+        self.populate_tabular_semantic_layer(neo4j_conn=neo4j_conn)
+        self.populate_tabular_usage_weights(neo4j_conn=neo4j_conn)
+        self.generate_tabular_descriptions(neo4j_conn=neo4j_conn)
 
-        rd_dataset = self.get_structured_metadata_for_embedding(neo4j_conn=neo4j_conn)
+        rd_dataset = self.get_tabular_metadata_for_embedding(neo4j_conn=neo4j_conn)
 
         if rd_dataset is not None:
             from nemo_retriever.params.utils import build_embed_kwargs
 
-            _STRUCTURED_TABLE = "nv-ingest-structured"
+            _TABULAR_TABLE = "nv-ingest-tabular"
 
-            if self._structured_embed_params is not None:
-                resolved = self._structured_embed_params
+            if self._tabular_embed_params is not None:
+                resolved = self._tabular_embed_params
                 embed_kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
 
                 rd_dataset = rd_dataset.repartition(
@@ -1153,10 +1297,7 @@ class BatchIngestor(Ingestor):
                 endpoint = (
                     embed_kwargs.get("embedding_endpoint") or embed_kwargs.get("embed_invoke_url") or ""
                 ).strip()
-                embed_actor_num_gpus = (
-                    0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
-                )
-
+                embed_actor_num_gpus = 0 if endpoint else self._requested_plan.get_embed_gpus_per_actor()
                 rd_dataset = rd_dataset.map_batches(
                     _BatchEmbedActor,
                     batch_size=self._requested_plan.get_embed_batch_size(),
@@ -1170,12 +1311,10 @@ class BatchIngestor(Ingestor):
                     fn_constructor_kwargs={"params": resolved},
                 )
 
-            if self._structured_vdb_params is not None:
-                structured_vdb_params = self._structured_vdb_params.model_copy(
+            if self._tabular_vdb_params is not None:
+                tabular_vdb_params = self._tabular_vdb_params.model_copy(
                     update={
-                        "lancedb": self._structured_vdb_params.lancedb.model_copy(
-                            update={"table_name": _STRUCTURED_TABLE}
-                        )
+                        "lancedb": self._tabular_vdb_params.lancedb.model_copy(update={"table_name": _TABULAR_TABLE})
                     }
                 )
                 rd_dataset = rd_dataset.map_batches(
@@ -1183,18 +1322,18 @@ class BatchIngestor(Ingestor):
                     batch_format="pandas",
                     num_cpus=1,
                     compute=rd.ActorPoolStrategy(size=1),
-                    fn_constructor_kwargs={"params": structured_vdb_params},
+                    fn_constructor_kwargs={"params": tabular_vdb_params},
                 )
 
             # Materialise the lazy Ray Data pipeline.
             result = rd_dataset.count()
 
             # Create the vector index after all writes have finished.
-            if self._structured_vdb_params is not None:
+            if self._tabular_vdb_params is not None:
                 saved_vdb_kwargs = getattr(self, "_vdb_upload_kwargs", None)
                 self._vdb_upload_kwargs = {
-                    **self._structured_vdb_params.lancedb.model_dump(mode="python"),
-                    "table_name": _STRUCTURED_TABLE,
+                    **self._tabular_vdb_params.lancedb.model_dump(mode="python"),
+                    "table_name": _TABULAR_TABLE,
                 }
                 self._create_lancedb_index()
                 if saved_vdb_kwargs is not None:

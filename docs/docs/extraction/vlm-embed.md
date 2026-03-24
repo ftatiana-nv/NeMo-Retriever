@@ -1,6 +1,6 @@
 # Use Multimodal Embedding with NeMo Retriever Library
 
-This guide explains how to use the [NeMo Retriever Library](https://www.perplexity.ai/search/overview.md) with the multimodal embedding model [Llama Nemotron Embed VL 1B v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2).
+This guide explains how to use the [NeMo Retriever Library](overview.md) with the multimodal embedding model [Llama Nemotron Embed VL 1B v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2).
 
 The `Llama Nemotron Embed VL 1B v2` model is optimized for multimodal question-answering and retrieval tasks.
 It can embed documents as text, images, or paired text-image combinations.
@@ -9,7 +9,7 @@ The model supports three embedding modalities: `text`, `image`, and `text_image`
 
 !!! note
 
-    This library is the NeMo Retriever Library.
+    NVIDIA Ingest (nv-ingest) has been renamed to the NeMo Retriever Library.
 
 
 ## Configure and Run the Multimodal NIM
@@ -189,5 +189,5 @@ results = ingestor.ingest()
 
 - [Support Matrix](support-matrix.md)
 - [Troubleshoot NeMo Retriever Library](troubleshoot.md)
-- [Use the NeMo Retriever Python API](python-api-reference.md)
+- [Use the NeMo Retriever Library Python API](python-api-reference.md)
 - [Extract Captions from Images](python-api-reference.md#extract-captions-from-images)

@@ -92,7 +92,7 @@ Each dataset includes its path, extraction settings, and recall evaluator in one
 ```yaml
 datasets:
   bo767:
-    path: /raid/jioffe/bo767
+    path: /datasets/nv-ingest/bo767
     extract_text: true
     extract_tables: true
     extract_charts: true
@@ -110,7 +110,7 @@ datasets:
     recall_dataset: jp20  # bo10k evaluator filtered to jp20 subset
 
   bo20:
-    path: /raid/jioffe/bo20
+    path: /datasets/nv-ingest/bo20
     extract_text: true
     extract_tables: true
     extract_charts: true
@@ -119,7 +119,7 @@ datasets:
     recall_dataset: null  # bo20 does not have recall
   
   earnings:
-    path: /raid/jioffe/earnings_conusulting
+    path: /datasets/nv-ingest/earnings_consulting
     extract_text: true
     extract_tables: true
     extract_charts: true
@@ -377,6 +377,7 @@ Recall testing evaluates retrieval accuracy against ground truth query sets. Two
 - Creates multimodal collection during ingestion
 - Evaluates recall immediately after ingestion
 - Combines ingestion metrics with recall metrics
+- With **`--minimize-vram`** (managed only): keeps only the ingestion stack up for e2e, then stops ingestion services and starts retrieval services (e.g. reranker) before recall to reduce VRAM usage. Mutually exclusive with `--keep-up`.
 
 ### Reranker Configuration
 
@@ -774,6 +775,9 @@ uv run nv-ingest-harness-run --case=e2e --dataset=bo767 --managed --no-build
 
 # Keep services running after test (useful for multi-test scenarios)
 uv run nv-ingest-harness-run --case=e2e --dataset=bo767 --managed --keep-up
+
+# Minimize VRAM during e2e_recall: stop ingestion-only services between e2e and recall, start reranker only when needed (managed + e2e_recall only; mutually exclusive with --keep-up)
+uv run nv-ingest-harness-run --case=e2e_recall --dataset=bo767 --managed --minimize-vram
 
 # Use GPU-specific configuration (A10G, L40S, A100-40GB)
 uv run nv-ingest-harness-run --case=e2e --dataset=bo767 --managed --sku=a10g

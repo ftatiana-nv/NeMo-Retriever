@@ -66,7 +66,7 @@ class PdfSplitParams(_ParamsModel):
 
 
 class TextChunkParams(_ParamsModel):
-    max_tokens: int = 512
+    max_tokens: int = 1024
     overlap_tokens: int = 0
     tokenizer_model_id: Optional[str] = None
     encoding: str = "utf-8"
@@ -161,11 +161,14 @@ class ExtractParams(_ParamsModel):
     extract_page_as_image: Optional[bool] = None
 
     # Extraction options
-    method: Optional[str] = None
+    method: str = "pdfium"
     use_table_structure: bool = False
     table_output_format: Optional[Literal["pseudo_markdown", "markdown"]] = None
     use_graphic_elements: bool = False
     dpi: int = 200
+    image_format: str = "jpeg"
+    jpeg_quality: int = 100
+    render_mode: Literal["full_dpi", "fit_to_model"] = "fit_to_model"
     inference_batch_size: int = 8
     ocr_model_dir: Optional[str] = None
 
@@ -210,14 +213,15 @@ class ExtractParams(_ParamsModel):
         return self
 
 
-IMAGE_MODALITIES: frozenset[str] = frozenset({"image", "text_image", "image_text"})
+VALID_EMBED_MODALITIES: frozenset[str] = frozenset({"text", "image", "text_image"})
+IMAGE_MODALITIES: frozenset[str] = frozenset({"image", "text_image"})
 
 
 class EmbedParams(_ParamsModel):
     model_name: Optional[str] = None
     embedding_endpoint: Optional[str] = None
     embed_invoke_url: Optional[str] = None
-    embedding_api_key: Optional[str] = None  # e.g. NVIDIA API key for inference-api.nvidia.com
+    api_key: Optional[str] = None  # e.g. NVIDIA API key for inference-api.nvidia.com
     input_type: str = "passage"
     embed_modality: str = "text"  # "text", "image", or "text_image" — default for all element types
     embed_granularity: Literal["element", "page"] = "element"  # "element" = per-element rows, "page" = one row per page
@@ -237,10 +241,15 @@ class EmbedParams(_ParamsModel):
 
     @field_validator("embed_modality", "text_elements_modality", "structured_elements_modality", mode="before")
     @classmethod
-    def _normalize_modality(cls, v: str | None) -> str | None:
-        if v == "image_text":
-            return "text_image"
-        return v
+    def _validate_modality(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        modality = str(v).strip()
+        if modality == "image_text":
+            raise ValueError("Use 'text_image' instead of 'image_text'.")
+        if modality not in VALID_EMBED_MODALITIES:
+            raise ValueError(f"Modality must be one of {sorted(VALID_EMBED_MODALITIES)}")
+        return modality
 
     @model_validator(mode="after")
     def _warn_page_granularity_overrides(self) -> "EmbedParams":
@@ -309,26 +318,26 @@ class InfographicParams(_ParamsModel):
 # ---------------------------------------------------------------------------
 
 
-class StructuredExtractParams(_ParamsModel):
+class TabularExtractParams(_ParamsModel):
     """Params for step 1: extract schema metadata and write to Neo4j.
 
     Covers SQLAlchemy reflection of a live database and/or parsing of
     pre-existing SQL DDL/query files.  Produces Database, Schema, Table,
     Column, View and Query nodes together with their relationships.
     The Neo4j connection is provided by get_neo4j_conn() (see
-    relational_db.neo4j_connection) and is not configured here.
+    tabular_data.neo4j) and is not configured here.
     """
 
     db_connection_string: Optional[str] = None
 
 
-class StructuredSemanticLayerParams(_ParamsModel):
+class TabularSemanticLayerParams(_ParamsModel):
     """Params for step 2: map business terms/attributes to graph entities.
 
     Global term and attribute definitions are matched to Table and Column
     nodes; unmatched entities receive auto-generated Term/Attribute nodes
     together with MAPS_TO_TABLE / MAPS_TO_COLUMN relationships.
-    The Neo4j connection is injected at runtime by ingest_structured().
+    The Neo4j connection is injected at runtime by ingest_tabular().
     """
 
     # Path to a YAML/JSON file containing the global semantic-layer definition
@@ -340,31 +349,13 @@ class StructuredSemanticLayerParams(_ParamsModel):
     auto_create_unmapped: bool = True
 
 
-class StructuredPIIParams(_ParamsModel):
-    """Params for step 3: detect PII in Column nodes and tag them.
-
-    Regex patterns are applied first; an optional LLM call can be made for
-    columns whose names/descriptions are ambiguous.  Matching columns receive
-    a ``pii_type`` property and a HAS_PII_TYPE relationship.
-    The Neo4j connection is injected at runtime by ingest_structured().
-    """
-
-    # Additional regex patterns keyed by PII type label
-    extra_patterns: dict[str, str] = Field(default_factory=dict)
-    # When True, ambiguous columns are also evaluated via an LLM
-    use_llm: bool = False
-    llm_invoke_url: Optional[str] = None
-    llm_api_key: Optional[str] = None
-    llm_model: Optional[str] = None
-
-
-class StructuredUsageWeightsParams(_ParamsModel):
+class TabularUsageWeightsParams(_ParamsModel):
     """Params for step 4: derive usage weights from query log files.
 
     Query log files are parsed and Table/Column co-occurrence frequencies are
     computed, then written back as ``usage_weight`` float properties on the
     corresponding Neo4j nodes.
-    The Neo4j connection is injected at runtime by ingest_structured().
+    The Neo4j connection is injected at runtime by ingest_tabular().
     """
 
     # One or more paths (or glob patterns) pointing to SQL query log files
@@ -374,12 +365,12 @@ class StructuredUsageWeightsParams(_ParamsModel):
     normalize_weights: bool = True
 
 
-class StructuredDescriptionParams(_ParamsModel):
+class TabularDescriptionParams(_ParamsModel):
     """Params for step 5: LLM-generate natural-language descriptions for all nodes.
 
     Descriptions are generated for Database, Schema, Table, Column, View and
     Query nodes and written back to Neo4j as a ``description`` property.
-    The Neo4j connection is injected at runtime by ingest_structured().
+    The Neo4j connection is injected at runtime by ingest_tabular().
     """
 
     llm_invoke_url: Optional[str] = None
@@ -393,14 +384,14 @@ class StructuredDescriptionParams(_ParamsModel):
     max_retries: int = 3
 
 
-class StructuredFetchParams(_ParamsModel):
+class TabularFetchParams(_ParamsModel):
     """Params for step 6: fetch entity descriptions from Neo4j into a DataFrame.
 
     Reads all node descriptions from Neo4j and assembles a pandas DataFrame
     with columns: ``text`` (the description), ``_embed_modality`` = ``"text"``,
     and ``metadata`` (JSON blob with entity_type, entity_name, node_id).
     No embedding is performed here — the DataFrame is passed to the embed step.
-    The Neo4j connection is injected at runtime by ingest_structured().
+    The Neo4j connection is injected at runtime by ingest_tabular().
     """
 
     # Node labels to fetch; empty list means all supported types

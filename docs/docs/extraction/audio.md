@@ -9,7 +9,7 @@ to extract speech from audio files.
 
 !!! note
 
-    NVIDIA Ingest and nv-ingest is now known as the NeMo Retriever Library.
+    NVIDIA Ingest (nv-ingest) has been renamed to the NeMo Retriever Library.
 
 Currently, you can extract speech from the following file types:
 
@@ -27,7 +27,7 @@ to transcribe speech to text, which is then embedded by using the Nemotron embed
 
 !!! important
 
-    Due to limitations in available VRAM controls in the current release, the RIVA ASR NIM microservice must run on a [dedicated additional GPU](support-matrix.md). For the full list of requirements, refer to [Support Matrix](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/support-matrix.html).
+    Due to limitations in available VRAM controls in the current release, the RIVA ASR NIM microservice must run on a [dedicated additional GPU](support-matrix.md). For the full list of requirements, refer to [Support Matrix](https://docs.nvidia.com/deeplearning/riva/user-guide/docs/support-matrix/support-matrix.html).
 
 This pipeline enables users to retrieve speech files at the segment level.
 
