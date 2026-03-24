@@ -1,6 +1,6 @@
 import pandas as pd
 from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
-from nemo_retriever.tabular_data.ingestion.population.graph.utils import (
+from nemo_retriever.tabular_data.ingestion.graph.utils import (
     load_fks,
     load_pks,
     load_tables,
@@ -78,7 +78,7 @@ def store_relational_db_in_neo4j(data, neo4j_conn=None):
                     populate_tabular_data uses its own DAL connection, but
                     accepted for API consistency with the other ingest steps).
     """
-    from nemo_retriever.tabular_data.ingestion.population.populate_data import (
+    from nemo_retriever.tabular_data.ingestion.populate_data import (
         populate_tabular_data,
     )
 

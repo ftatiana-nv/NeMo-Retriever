@@ -1,13 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from nemo_retriever.tabular_data.ingestion.population.graph.utils import chunks
-from nemo_retriever.tabular_data.ingestion.population.graph.dal.schemas_dal import (
+from nemo_retriever.tabular_data.ingestion.graph.utils import chunks
+from nemo_retriever.tabular_data.ingestion.graph.dal.schemas_dal import (
     add_schemas_edge,
     merge_schema_edges,
     merge_schema_nodes,
 )
-from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import Labels
-from nemo_retriever.tabular_data.ingestion.population.graph.model.schema import Schema
+from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.graph.model.schema import Schema
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1261,7 +1261,7 @@ class BatchIngestor(Ingestor):
         Columns: text, _embed_modality, path, page_number, metadata —
         matching the unstructured pipeline row format.
         """
-        from ..tabular_data.ingestion.prepare_for_embedding.prepare_embedding_text import (
+        from ..tabular_data.ingestion.prepare_embedding_text import (
             fetch_relational_db_for_embedding,
             neo4j_tables_result_to_embedding_dataframe,
         )

@@ -1,5 +1,5 @@
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
 
 conn = get_neo4j_conn()
 

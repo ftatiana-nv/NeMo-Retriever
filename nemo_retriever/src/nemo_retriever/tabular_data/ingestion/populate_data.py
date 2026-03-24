@@ -2,23 +2,23 @@ from datetime import datetime, timezone
 import logging
 import time
 
-from nemo_retriever.tabular_data.ingestion.population.graph.dal.db_dal import (
+from nemo_retriever.tabular_data.ingestion.graph.dal.db_dal import (
     db_exists,
     update_node_property,
     delete_schema,
     update_diff_from_existing_schema,
 )
-from nemo_retriever.tabular_data.ingestion.population.graph.indexes import add_indices
+from nemo_retriever.tabular_data.ingestion.graph.indexes import add_indices
 from concurrent.futures import ThreadPoolExecutor
-from nemo_retriever.tabular_data.ingestion.population.graph.parsers import schemas_parser
-from nemo_retriever.tabular_data.ingestion.population.graph.dal.schemas_dal import (
+from nemo_retriever.tabular_data.ingestion.graph.parsers import schemas_parser
+from nemo_retriever.tabular_data.ingestion.graph.dal.schemas_dal import (
     get_schemas_ids_and_names,
     add_fks,
     add_pks,
     delete_old_fks,
     reset_pks,
 )
-from nemo_retriever.tabular_data.ingestion.population.graph.services.schema import add_schema
+from nemo_retriever.tabular_data.ingestion.graph.services.schema import add_schema
 
 logger = logging.getLogger(__name__)
 
