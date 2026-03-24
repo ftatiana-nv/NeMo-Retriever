@@ -1,10 +1,7 @@
 import logging
 import uuid
 from json import JSONEncoder
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
-    Labels,
-    label_to_type,
-)
+from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +25,6 @@ class Node:
             self.id = str(existing_id)
 
         self.props.update({"id": str(self.id)})
-        if "type" not in self.props:
-            self.props.update({"type": label_to_type(label)})
-
         self.match_props = match_props
         if match_props is None:
             self.match_props = {"id": str(self.id)}

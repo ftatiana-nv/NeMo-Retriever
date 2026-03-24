@@ -6,11 +6,8 @@ class Labels:
     ALIAS = "Alias"
     SQL = "Sql"
     COLUMN = "Column"
-    TEMP_COLUMN = "TempColumn"
     TABLE = "Table"
-    TEMP_TABLE = "TempTable"
     SCHEMA = "Schema"
-    TEMP_SCHEMA = "TempSchema"
     DB = "Db"
     CONNECTION = "Connection"
 
@@ -19,9 +16,6 @@ class Labels:
         SCHEMA,
         TABLE,
         COLUMN,
-        TEMP_SCHEMA,
-        TEMP_TABLE,
-        TEMP_COLUMN,
         SQL,
         COMMAND,
         OPERATOR,
@@ -33,13 +27,7 @@ class Labels:
 
 class Edges:
     CONTAINS = "CONTAINS"
-    CONNECTING = "CONNECTING"
     FOREIGN_KEY = "FOREIGN_KEY"
-
-
-labels_to_types = {
-    Labels.TABLE: "base table",
-}
 
 
 class Props:
@@ -61,9 +49,3 @@ class RelTypes(Edges):
 
 # Relationship types for owner traversal (used by get_node_parent_owner_by_id).
 data_relationships = [Edges.CONTAINS]
-
-
-def label_to_type(label: str) -> str:
-    if label in labels_to_types:
-        return labels_to_types[label]
-    return label

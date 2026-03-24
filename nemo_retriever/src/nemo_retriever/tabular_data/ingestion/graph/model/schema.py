@@ -1,9 +1,6 @@
 import logging
 import uuid
 from nemo_retriever.tabular_data.ingestion.graph.model.node import Node
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
-    label_to_type,
-)
 import pandas as pd
 import numpy as np
 from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
@@ -95,7 +92,7 @@ class Schema:
                 "created": None if pd.isna(x["created"]) else x["created"],
                 "last_altered": (None if pd.isna(x["last_altered"]) else x["last_altered"]),
                 "id": x.id,
-                "label": Labels.TEMP_TABLE if x["is_temp"] else Labels.TABLE,
+                "label": Labels.TABLE,
             },
             axis=1,
         )
@@ -120,8 +117,7 @@ class Schema:
                 "ordinal_position": x["ordinal_position"],
                 "description": None if pd.isna(x["comment"]) else x["comment"],
                 "id": x.id,
-                "label": Labels.TEMP_COLUMN if x["is_temp"] else Labels.COLUMN,
-                "type": label_to_type(Labels.TEMP_COLUMN if x["is_temp"] else Labels.COLUMN),
+                "label": Labels.COLUMN,
             },
             axis=1,
         )
@@ -285,11 +281,10 @@ class Schema:
         length=None,
         scale=None,
         ordinal_position=None,
-        is_temp=False,
     ):
         column_name_lower = column_name.lower()
         table_name_lower = table_name.lower()
-        label = Labels.COLUMN if not is_temp else Labels.TEMP_COLUMN
+        label = Labels.COLUMN
         props = {"name": column_name}
         match_props = {
             "db_name": self.get_db_name(),
@@ -401,7 +396,6 @@ class Schema:
                 length=length,
                 scale=scale,
                 ordinal_position=ordinal_position,
-                is_temp=column_df.iloc[0]["is_temp"],
             )
             column_node = self.get_column_node(column_df.iloc[0]["column_name"], table_name)
             table_node = self.get_table_node(table_name)
@@ -428,10 +422,9 @@ class Schema:
         created=None,
         last_altered=None,
         description=None,
-        is_temp=False,
     ):
         table_name_lower = table_name.lower()
-        label = Labels.TABLE if not is_temp else Labels.TEMP_TABLE
+        label = Labels.TABLE
         props = {"name": table_name}
         match_props = {
             "db_name": self.get_db_name(),
@@ -533,14 +526,13 @@ class Schema:
                 created,
                 last_altered,
                 description,
-                is_temp=table_df.iloc[0]["is_temp"],
             )
         return self.table_nodes[table_name_lower]
 
     def get_schema_node(self):
         return self.schema_node
 
-    def create_schema_node(self, schema_name, id=None, is_temp=False):
+    def create_schema_node(self, schema_name, id=None):
         if self.schema_node is None:
             self.schema_name = schema_name
             props = {"name": schema_name}
@@ -550,7 +542,7 @@ class Schema:
             }
             self.schema_node = Node(
                 name=schema_name,
-                label=Labels.SCHEMA if not is_temp else Labels.TEMP_SCHEMA,
+                label=Labels.SCHEMA,
                 props=props,
                 existing_id=id,
                 match_props=match_props,
@@ -560,7 +552,7 @@ class Schema:
         column_name_lower = column_name.lower()
         table_name_lower = table_node.name.lower()
 
-        if (self.columns_df is not None) and table_node.label != Labels.TEMP_TABLE:
+        if self.columns_df is not None:
             return table_name_lower in self.columns_map and column_name_lower in self.columns_map[table_name_lower]
         else:
             if table_node in self.tables_to_columns:

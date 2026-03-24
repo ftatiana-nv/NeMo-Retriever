@@ -31,8 +31,6 @@ def parse_df(tables_df, columns_df, db_node=None):
     for schema_name in unique_schema_names:
         schema_tables_df = tables_df.loc[tables_df["schema"] == schema_name]
         schema_columns_df = columns_df.loc[columns_df["schema"] == schema_name]
-        schema_tables_df["is_temp"] = False
-        schema_columns_df["is_temp"] = False
         logger.info(f"Started parsing schema {schema_name}.")
         schema = Schema(db_node, schema_tables_df, schema_columns_df)
         schema.create_schema_node(schema_name)

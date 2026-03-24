@@ -4,22 +4,11 @@ from nemo_retriever.tabular_data.ingestion.graph.model.node import Node
 from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
     Props,
     Labels,
-    label_to_type,
 )
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 logger = logging.getLogger(__name__)
 conn = get_neo4j_conn()
-
-
-def entity_exists_in_graph_insensitive(name: str, label: Labels):
-    name = name.strip()
-    query = f"""MATCH(n:{label})
-            WHERE toLower(n.name) = toLower($name)
-            RETURN n
-            """
-    result = conn.query_read(query=query, parameters={"name": name})
-    return True if len(result) > 0 else False
 
 
 def is_flat_dict(properties: dict):
@@ -94,8 +83,6 @@ def prepare_node(node: Node):
 
     identity_props = node.get_match_props()
     on_create_props = props.copy()
-    if "type" not in on_create_props:
-        on_create_props.update({"type": label_to_type(on_create_props["label"])})
     override_props = node.get_override_existing_props() if node.get_override_existing_props() else {}
     return [label], identity_props, on_create_props, override_props
 
