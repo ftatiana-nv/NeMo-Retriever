@@ -12,7 +12,7 @@ Single question (default, sql-tool):
 Deep-agent batch:
   PYTHONPATH=nemo_retriever/src python debug_retriever_sql.py --batch --mode deep-agent
 
-Loop over spider2-lite.jsonl (sql-tool):
+Loop over benchmark/spider2-lite.jsonl (shared by sql-tool and deep-agent batch):
   PYTHONPATH=nemo_retriever/src python debug_retriever_sql.py --batch
 
 Run only instances whose instance_id starts with a prefix (e.g. "local"):
@@ -41,7 +41,8 @@ _BENCHMARK = (
 SQL_TOOL_DIR = _BENCHMARK / "sql_tool"
 DEEP_AGENT_DIR = _BENCHMARK / "deep_agent"
 
-SPIDER2_LITE_JSONL = SQL_TOOL_DIR / "spider2-lite.jsonl"
+# Shared Spider2-lite task list (all models / pipelines); not under sql_tool only.
+SPIDER2_LITE_JSONL = _BENCHMARK / "spider2-lite.jsonl"
 
 # Subfolder under ``generated_sql/`` so batch outputs are clearly separated by pipeline.
 _OUTPUT_MODE_DIR = {"deep-agent": "deep_agent", "sql-tool": "sql_tool"}
