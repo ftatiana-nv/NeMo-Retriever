@@ -30,8 +30,7 @@ def query_neo4j_tables_for_embedding() -> List[dict]:
     return result[0].get("docs") or []
 
 
-def neo4j_tables_result_to_embedding_dataframe(
-    neo4j_docs: List[dict],
+def fetch_tabular_embedding_dataframe(
     *,
     text_key: str = "text",
     id_key: str = "id",
@@ -39,19 +38,19 @@ def neo4j_tables_result_to_embedding_dataframe(
     name_key: str = "name",
     embed_modality: str = "text",
 ) -> pd.DataFrame:
-    """
-    Build a DataFrame from Neo4j table/column query results for use with
-    nemo_retriever's embed_text_main_text_embed (same as InProcessIngestor.embed()).
+    """Fetch all tabular entity docs from Neo4j and return a DataFrame ready for embedding.
 
     Each row has: text, _embed_modality, path, page_number, metadata
     (id, label, name, source_path) — matching the format produced by the
     unstructured pipeline so run_pipeline_tasks_on_df works without changes.
     """
-    if not neo4j_docs:
-        return pd.DataFrame(columns=["text", "_embed_modality", "path", "page_number", "metadata"])
+    _empty = pd.DataFrame(columns=["text", "_embed_modality", "path", "page_number", "metadata"])
+    docs = query_neo4j_tables_for_embedding()
+    if not docs:
+        return _empty
 
     rows = []
-    for item in neo4j_docs:
+    for item in docs:
         text = (item.get(text_key) or "").strip()
         node_id = item.get(id_key)
         label = item.get(label_key, "")
@@ -72,14 +71,3 @@ def neo4j_tables_result_to_embedding_dataframe(
             }
         )
     return pd.DataFrame(rows)
-
-
-def fetch_relational_db_for_embedding() -> List[dict]:
-    """Collect all docs to embed from the relational DB graph.
-
-    Each source function returns a list of doc dicts; results are unioned here.
-    Add future fetch calls below and extend `all_docs` accordingly.
-    """
-    all_docs: List[dict] = []
-    all_docs.extend(query_neo4j_tables_for_embedding())
-    return all_docs

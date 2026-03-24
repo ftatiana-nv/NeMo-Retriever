@@ -56,6 +56,7 @@ from ..params import TextChunkParams
 from ..params import CaptionParams
 from ..params import VdbUploadParams
 from ..tabular_data.neo4j import get_neo4j_conn
+from ..tabular_data.ingestion.embeddings import fetch_tabular_embedding_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -1304,15 +1305,9 @@ class BatchIngestor(Ingestor):
         Columns: text, _embed_modality, path, page_number, metadata —
         matching the unstructured pipeline row format.
         """
-        from ..tabular_data.ingestion.embeddings import (
-            fetch_relational_db_for_embedding,
-            neo4j_tables_result_to_embedding_dataframe,
-        )
-
-        docs = fetch_relational_db_for_embedding()
-        if not docs:
+        df = fetch_tabular_embedding_dataframe()
+        if df.empty:
             return None
-        df = neo4j_tables_result_to_embedding_dataframe(docs)
         return rd.from_pandas(df)
 
     def ingest_tabular(
