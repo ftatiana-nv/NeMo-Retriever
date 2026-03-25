@@ -23,9 +23,9 @@ from __future__ import annotations
 
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-
+import duckdb
 import pandas as pd
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +42,8 @@ class DuckDB:
         Open the database in read-only mode (default: False).
     """
 
-    def __init__(self, connection: Optional[Dict[str, Any]] = None) -> None:
-        try:
-            import duckdb  # type: ignore
-        except ImportError as exc:
-            raise ImportError("DuckDB is required. Install it via: pip install 'duckdb>=1.2.0'") from exc
-
-        self.connection_properties = connection or {}
+    def __init__(self, connection: Dict[str, Any]) -> None:
+        self.connection_properties = connection
         db_path = self.connection_properties.get("database", ":memory:")
         read_only = self.connection_properties.get("read_only", False)
         self.conn = duckdb.connect(database=db_path, read_only=read_only)
@@ -117,8 +112,7 @@ class DuckDB:
                 table_catalog AS "database",
                 table_schema  AS "schema",
                 table_name    AS "table_name",
-                table_type    AS "table_type",
-                NULL          AS "created"
+                table_type    AS "table_type"
             FROM information_schema.tables
             ORDER BY table_catalog, table_schema, table_name
         """

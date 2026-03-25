@@ -55,6 +55,7 @@ from ..params import TabularUsageWeightsParams
 from ..params import TextChunkParams
 from ..params import VdbUploadParams
 from ..tabular_data.neo4j import get_neo4j_conn
+from ..tabular_data.ingestion.embeddings import fetch_tabular_embedding_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +268,22 @@ class BatchIngestor(Ingestor):
         # Stored params for the tabular ingest path (no Ray Dataset needed).
         self._tabular_embed_params: Optional[EmbedParams] = None
         self._tabular_vdb_params: Optional[VdbUploadParams] = None
+
+    @staticmethod
+    def _positive_int(value: Any) -> int | None:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0 else None
+
+    @staticmethod
+    def _positive_float(value: Any) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if parsed > 0.0 else None
 
     def files(self, documents: Union[str, List[str]]) -> "BatchIngestor":
         """
@@ -873,6 +890,13 @@ class BatchIngestor(Ingestor):
             resolved = resolved.model_copy(update={"api_key": resolve_remote_api_key()})
 
         kwargs = build_embed_kwargs(resolved, include_batch_tuning=True)
+        embed_batch_size = (
+            self._positive_int(kwargs.get("embed_batch_size")) or self._requested_plan.get_embed_batch_size()
+        )
+        embed_workers = self._positive_int(kwargs.get("embed_workers"))
+        embed_initial_actors = embed_workers or self._requested_plan.get_embed_initial_actors()
+        embed_min_actors = embed_workers or self._requested_plan.get_embed_min_actors()
+        embed_max_actors = embed_workers or self._requested_plan.get_embed_max_actors()
 
         # Remaining kwargs are forwarded to the actor constructor.
         embed_modality = resolved.embed_modality
@@ -880,9 +904,7 @@ class BatchIngestor(Ingestor):
         self._tasks.append(("embed", dict(kwargs)))
 
         # We want to create Ray batches that are of the same size as the embed_batch_size.
-        self._rd_dataset = self._rd_dataset.repartition(
-            target_num_rows_per_block=self._requested_plan.get_embed_batch_size()
-        )
+        self._rd_dataset = self._rd_dataset.repartition(target_num_rows_per_block=embed_batch_size)
 
         if embed_granularity == "page":
             _row_fn = partial(
@@ -900,7 +922,7 @@ class BatchIngestor(Ingestor):
             )
         self._rd_dataset = self._rd_dataset.map_batches(
             _row_fn,
-            batch_size=self._requested_plan.get_embed_batch_size(),
+            batch_size=embed_batch_size,
             batch_format="pandas",
             num_cpus=1,
         )
@@ -910,17 +932,19 @@ class BatchIngestor(Ingestor):
         if endpoint:
             embed_actor_num_gpus = 0  # We do not need GPU resources if invoking a remote NIM endpoint
         else:
-            embed_actor_num_gpus = self._requested_plan.get_embed_gpus_per_actor()
+            embed_actor_num_gpus = (
+                self._positive_float(kwargs.get("gpu_embed")) or self._requested_plan.get_embed_gpus_per_actor()
+            )
 
         self._rd_dataset = self._rd_dataset.map_batches(
             _BatchEmbedActor,
-            batch_size=self._requested_plan.get_embed_batch_size(),
+            batch_size=embed_batch_size,
             batch_format="pandas",
             num_gpus=embed_actor_num_gpus,  # pulled from if statement above
             compute=rd.ActorPoolStrategy(
-                initial_size=self._requested_plan.get_embed_initial_actors(),
-                min_size=self._requested_plan.get_embed_min_actors(),
-                max_size=self._requested_plan.get_embed_max_actors(),
+                initial_size=embed_initial_actors,
+                min_size=embed_min_actors,
+                max_size=embed_max_actors,
             ),
             fn_constructor_kwargs={"params": resolved},
         )
@@ -1238,15 +1262,9 @@ class BatchIngestor(Ingestor):
         Columns: text, _embed_modality, path, page_number, metadata —
         matching the unstructured pipeline row format.
         """
-        from ..tabular_data.ingestion.prepare_for_embedding.prepare_embedding_text import (
-            fetch_relational_db_for_embedding,
-            neo4j_tables_result_to_embedding_dataframe,
-        )
-
-        docs = fetch_relational_db_for_embedding()
-        if not docs:
+        df = fetch_tabular_embedding_dataframe()
+        if df.empty:
             return None
-        df = neo4j_tables_result_to_embedding_dataframe(docs)
         return rd.from_pandas(df)
 
     def ingest_tabular(
