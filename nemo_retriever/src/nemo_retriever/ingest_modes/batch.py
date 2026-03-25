@@ -1252,9 +1252,9 @@ class BatchIngestor(Ingestor):
         params: TabularExtractParams | None = None,
     ) -> dict:
         """Step 1 — Pull schema entities from the relational DB into a data dict."""
-        from ..tabular_data.ingestion.extract_data import extract_relational_db_data
+        from ..tabular_data.ingestion.extract_data import extract_tabular_db_data
 
-        return extract_relational_db_data(params=params)
+        return extract_tabular_db_data(params=params)
 
     def store_tabular_in_neo4j(
         self,

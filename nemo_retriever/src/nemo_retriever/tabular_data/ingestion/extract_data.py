@@ -1,9 +1,9 @@
 from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
 from nemo_retriever.tabular_data.ingestion.graph.utils import (
-    load_fks,
-    load_pks,
-    load_tables,
-    load_columns,
+    normalize_fks,
+    normalize_pks,
+    normalize_tables,
+    normalize_columns,
 )
 
 
@@ -23,10 +23,10 @@ def create_dataframe(settings):
 def data_for_populate_tabular(settings):
     """Build the `data` dict expected by populate_tabular_data() from create_dataframe output."""
     tables, columns, views, queries, pks, fks = create_dataframe(settings)
-    tables = load_tables(tables)
-    columns = load_columns(columns)
-    pks = load_pks(pks)
-    fks = load_fks(fks)
+    tables = normalize_tables(tables)
+    columns = normalize_columns(columns)
+    pks = normalize_pks(pks)
+    fks = normalize_fks(fks)
     data = {
         "tables": tables,
         "columns": columns,
@@ -38,7 +38,7 @@ def data_for_populate_tabular(settings):
     return data
 
 
-def extract_relational_db_data(params=None):
+def extract_tabular_db_data(params=None):
     """Step 1 — Pull schema entities from the relational DB into a data dict.
 
     Args:
@@ -59,7 +59,7 @@ def store_relational_db_in_neo4j(data, neo4j_conn=None):
     """Step 2 — Write the extracted data dict as graph nodes into Neo4j.
 
     Args:
-        data:       Data dict returned by extract_relational_db_data().
+        data:       Data dict returned by extract_tabular_db_data().
         neo4j_conn: Active Neo4jConnectionManager instance (unused directly here;
                     populate_tabular_data uses its own DAL connection, but
                     accepted for API consistency with the other ingest steps).

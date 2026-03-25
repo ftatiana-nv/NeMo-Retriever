@@ -55,7 +55,7 @@ def chunks(lst, n):
         yield lst[i : i + n]
 
 
-def load_tables(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_tables(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a tables DataFrame. Expects a DataFrame only."""
     types = {
         "database": "category",
@@ -84,7 +84,7 @@ def load_tables(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_columns(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a columns DataFrame. Expects a DataFrame only."""
     types = {
         "database": "category",
@@ -110,7 +110,7 @@ def load_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_fks(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_fks(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a foreign-keys DataFrame. Expects a DataFrame only."""
     types = {
         "created_on": "string",
@@ -140,7 +140,7 @@ def load_fks(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def load_pks(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_pks(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a primary-keys DataFrame. Expects a DataFrame only."""
     types = {
         "created_on": "string",

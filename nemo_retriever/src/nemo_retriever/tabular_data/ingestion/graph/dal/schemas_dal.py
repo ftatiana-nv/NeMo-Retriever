@@ -2,8 +2,8 @@ import pandas as pd
 import logging
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from nemo_retriever.tabular_data.ingestion.graph.utils import (
-    load_tables,
-    load_columns,
+    normalize_tables,
+    normalize_columns,
 )
 from nemo_retriever.tabular_data.ingestion.graph.model.node import Node
 from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
@@ -78,8 +78,8 @@ def get_schema_columns(db_name, schema_name):
             "schema_name": schema_name,
         },
     )
-    # Neo4j collect() returns a list; load_columns expects a DataFrame
-    return load_columns(pd.DataFrame(res[0]["columns"] if res[0]["columns"] else []))
+    # Neo4j collect() returns a list; normalize_columns expects a DataFrame
+    return normalize_columns(pd.DataFrame(res[0]["columns"] if res[0]["columns"] else []))
 
 
 def get_schema_tables(db_name, schema_name):
@@ -101,8 +101,8 @@ def get_schema_tables(db_name, schema_name):
             "schema_name": schema_name,
         },
     )
-    # Neo4j collect() returns a list; load_tables expects a DataFrame
-    return load_tables(pd.DataFrame(res[0]["tables"] if res[0]["tables"] else []))
+    # Neo4j collect() returns a list; normalize_tables expects a DataFrame
+    return normalize_tables(pd.DataFrame(res[0]["tables"] if res[0]["tables"] else []))
 
 
 def add_schemas_edge(edge, created):
