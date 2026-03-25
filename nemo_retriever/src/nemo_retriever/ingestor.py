@@ -22,7 +22,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from nemo_retriever.application.modes.factory import create_runmode_ingestor
 from nemo_retriever.params import EmbedParams
 from nemo_retriever.params import ExtractParams
-
 from nemo_retriever.params import IngestExecuteParams
 from nemo_retriever.params import IngestorCreateParams
 from nemo_retriever.params import RunMode
