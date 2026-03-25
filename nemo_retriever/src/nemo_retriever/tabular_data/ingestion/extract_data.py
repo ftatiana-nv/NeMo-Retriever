@@ -64,7 +64,7 @@ def store_relational_db_in_neo4j(data, neo4j_conn=None):
                     populate_tabular_data uses its own DAL connection, but
                     accepted for API consistency with the other ingest steps).
     """
-    from nemo_retriever.tabular_data.ingestion.populate_data import (
+    from nemo_retriever.tabular_data.ingestion.write_to_graph import (
         populate_tabular_data,
     )
 
