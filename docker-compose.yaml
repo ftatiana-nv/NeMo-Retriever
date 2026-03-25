@@ -522,7 +522,7 @@ services:
       - retrieval
 
   neo4j:
-    image: neo4j:5.26
+    image: neo4j:latest
     container_name: neo4j
     ports:
       - "7474:7474"   # Browser UI
