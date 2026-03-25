@@ -1,9 +1,4 @@
 class Labels:
-    COMMAND = "Command"
-    OPERATOR = "Operator"
-    FUNCTION = "Function"
-    CONSTANT = "Constant"
-    ALIAS = "Alias"
     SQL = "Sql"
     COLUMN = "Column"
     TEMP_COLUMN = "TempColumn"
@@ -12,7 +7,6 @@ class Labels:
     SCHEMA = "Schema"
     TEMP_SCHEMA = "TempSchema"
     DB = "Db"
-    CONNECTION = "Connection"
 
     LIST_OF_ALL = [
         DB,
@@ -23,11 +17,6 @@ class Labels:
         TEMP_TABLE,
         TEMP_COLUMN,
         SQL,
-        COMMAND,
-        OPERATOR,
-        FUNCTION,
-        CONSTANT,
-        CONNECTION,
     ]
 
 

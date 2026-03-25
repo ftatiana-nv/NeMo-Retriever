@@ -100,17 +100,6 @@ def get_schema_tables(db_name, schema_name):
     return load_tables(pd.DataFrame(res[0]["tables"] if res[0]["tables"] else []))
 
 
-def get_db_ids_and_names(connection_id=None):
-    if connection_id:
-        query = f"""match (c:{Labels.CONNECTION} {{id: $conn_id}})-[:{RelTypes.CONNECTING}]->(db:{Labels.DB}) 
-                   return collect({{id: db.id, name:db.name}}) as dbs"""
-    else:
-        query = f"""match (db:{Labels.DB}) 
-                   return collect({{id: db.id, name:db.name}}) as dbs"""
-    return conn.query_read_only(
-        query=query, parameters={"conn_id": connection_id}
-    )[0]["dbs"]
-
 
 def add_schemas_edge(edge, created):
     """
