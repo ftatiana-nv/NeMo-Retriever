@@ -343,7 +343,7 @@ class TabularExtractParams(_ParamsModel):
     tabular_data.neo4j) and is not configured here.
     """
 
-    db_connection_string: Optional[str] = None
+    connection_string: Optional[str] = None
 
 
 class TabularSemanticLayerParams(_ParamsModel):
