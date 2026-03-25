@@ -9,25 +9,14 @@ from nemo_retriever.tabular_data.ingestion.graph.utils import (
 
 
 def create_dataframe(settings):
-    duckdb_connector = DuckDB(settings.get("connection_properties", {"database": "./spider2.duckdb"}))
+    duck = DuckDB(settings.get("connection_string", "./spider2.duckdb"))
 
-    queries = duckdb_connector.get_queries()
-
-    schema = duckdb_connector.get_schemas()
-    tables = schema[0]
-    columns = schema[1]
-
-    views = duckdb_connector.get_views()
-
-    pull_df = pd.DataFrame(duckdb_connector.db_schemas).explode("schemas")
-    pull_df = pull_df.rename({"db_name": "database", "schemas": "schema"}, axis=1)
-
-    tables = tables.merge(pull_df)
-    columns = columns.merge(pull_df)
-    views = views.merge(pull_df)
-
-    pks = duckdb_connector.get_pks()
-    fks = duckdb_connector.get_fks()
+    queries = duck.get_queries()
+    tables = duck.get_tables()
+    columns = duck.get_columns()
+    views = duck.get_views()
+    pks = duck.get_pks()
+    fks = duck.get_fks()
 
     return tables, columns, views, queries, pks, fks
 
@@ -55,17 +44,17 @@ def extract_relational_db_data(params=None):
 
     Args:
         params: TabularExtractParams instance. When provided,
-            ``params.db_connection_string`` overrides the default database path.
+            ``params.connection_string`` overrides the default database path.
 
     Returns:
         data dict with keys: tables, columns, views, pks, fks.
     """
     db_path = (
-        params.db_connection_string
-        if params is not None and params.db_connection_string is not None
+        params.connection_string
+        if params is not None and params.connection_string is not None
         else "./spider2.duckdb"
     )
-    settings = {"connection_properties": {"database": db_path}}
+    settings = {"connection_string": db_path}
     return data_for_populate_tabular(settings)
 
 

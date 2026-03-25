@@ -42,12 +42,9 @@ class DuckDB:
         Open the database in read-only mode (default: False).
     """
 
-    def __init__(self, connection: Dict[str, Any]) -> None:
-        self.connection_properties = connection
-        db_path = self.connection_properties.get("database", ":memory:")
-        read_only = self.connection_properties.get("read_only", False)
-        self.conn = duckdb.connect(database=db_path, read_only=read_only)
-        logger.debug("DuckDB connected (database=%r, read_only=%s).", db_path, read_only)
+    def __init__(self, connection_string: str) -> None:
+        self.conn = duckdb.connect(database=connection_string, read_only=False)
+        logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, False)
 
     # ------------------------------------------------------------------
     # Execution
@@ -70,40 +67,10 @@ class DuckDB:
             rel = self.conn.execute(sql)
         return rel.df()
 
-    @property
-    def db_schemas(self) -> List[Dict[str, Any]]:
-        """Return a list of {db_name, schemas} for merging with tables/columns/views."""
-        return [{"db_name": db, "schemas": self.list_db_schemas(db)} for db in self.list_databases()]
-
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def list_databases(self) -> List[str]:
-        """Return all catalog/database names visible in this connection."""
-        df = self.execute("SELECT DISTINCT catalog_name FROM information_schema.schemata")
-        return df["catalog_name"].tolist()
-
-    def list_schemas(self) -> List[str]:
-        """Return all catalog/schema names (alias for list_databases)."""
-        return self.list_databases()
-
-    def list_db_schemas(self, db: str) -> List[str]:
-        """Return schema names within *db*."""
-        df = self.execute(
-            f"SELECT DISTINCT schema_name FROM information_schema.schemata " f"WHERE catalog_name = '{db}'"
-        )
-        return df["schema_name"].tolist()
-
-    def schema_tables(self, catalog_or_schema: str) -> List[str]:
-        """Return table names in the given catalog (e.g. Spider2 schema name like 'Airlines')."""
-        df = self.execute(
-            "SELECT DISTINCT table_name FROM information_schema.tables "
-            "WHERE table_catalog = ? OR table_schema = ? ORDER BY table_name",
-            [catalog_or_schema, catalog_or_schema],
-        )
-        return df["table_name"].tolist()
-
+    
     def get_tables(self) -> pd.DataFrame:
         """Return all tables from information_schema as a DataFrame."""
         return self.execute(
@@ -135,10 +102,6 @@ class DuckDB:
         """
         )
 
-    def get_schemas(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Return (tables_df, columns_df) from information_schema."""
-        return self.get_tables(), self.get_columns()
-
     def get_queries(self) -> pd.DataFrame:
         """DuckDB has no built-in query history — returns an empty DataFrame."""
         return pd.DataFrame(columns=["end_time", "query_text"])
@@ -157,6 +120,7 @@ class DuckDB:
         """
         )
 
+    # Todo: Test as Spider2 has no PKs
     def get_pks(self) -> pd.DataFrame:
         """Return primary key columns from duckdb_constraints() as a DataFrame.
 
@@ -191,6 +155,7 @@ class DuckDB:
         except Exception:
             return empty
 
+    # Todo: Test as Spider2 has no FKs
     def get_fks(self) -> pd.DataFrame:
         """Return foreign key columns from duckdb_constraints() as a DataFrame.
 

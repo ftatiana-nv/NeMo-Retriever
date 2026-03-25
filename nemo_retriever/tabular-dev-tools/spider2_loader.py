@@ -17,8 +17,7 @@ import re
 import pandas as pd
 from pathlib import Path
 from typing import Any, Dict, List, Union
-from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
-
+import duckdb
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +26,7 @@ def _sanitize(name: str) -> str:
     return ("s_" + s) if s and s[0].isdigit() else s or "unnamed"
 
 
-def _load_spider2_lite_json(engine: "DuckDB", schema: str, table: str, json_path: Path) -> None:
+def _load_spider2_lite_json(conn, schema: str, table: str, json_path: Path) -> None:
     """Load a single Spider2-lite JSON file into a DuckDB table."""
     try:
         raw = _json.loads(json_path.read_text(encoding="utf-8", errors="replace"))
@@ -40,7 +39,7 @@ def _load_spider2_lite_json(engine: "DuckDB", schema: str, table: str, json_path
             col_names = raw.get("column_names", [])
             if col_names:
                 cols_ddl = ", ".join(f'"{n}" VARCHAR' for n in col_names)
-                engine.conn.execute(f"CREATE OR REPLACE TABLE {schema}.{table} ({cols_ddl})")
+                conn.execute(f"CREATE OR REPLACE TABLE {schema}.{table} ({cols_ddl})")
             return
         df = pd.DataFrame(rows)
     elif isinstance(raw, list):
@@ -49,13 +48,13 @@ def _load_spider2_lite_json(engine: "DuckDB", schema: str, table: str, json_path
         df = pd.DataFrame([raw])
 
     view = f"_tmp_{schema}_{table}"
-    engine.conn.register(view, df)
-    engine.conn.execute(f"CREATE OR REPLACE TABLE {schema}.{table} AS SELECT * FROM {view}")
-    engine.conn.unregister(view)
+    conn.register(view, df)
+    conn.execute(f"CREATE OR REPLACE TABLE {schema}.{table} AS SELECT * FROM {view}")
+    conn.unregister(view)
 
 
 def load_spider2_lite(
-    engine: "DuckDB",
+    db_path: str,
     spider2_lite_dir: Union[str, Path],
     *,
     overwrite: bool = False,
@@ -74,6 +73,7 @@ def load_spider2_lite(
     overwrite:
         Drop and recreate schemas that already exist (default: False).
     """
+    conn = duckdb.connect(database=db_path)
     root = Path(spider2_lite_dir).expanduser().resolve()
     sqlite_dir = root / "resource" / "databases" / "sqlite"
 
@@ -90,10 +90,10 @@ def load_spider2_lite(
     failed: List[Dict[str, str]] = []
 
     existing_schemas = set(
-        engine.execute(
+        conn.execute(
             "SELECT schema_name FROM information_schema.schemata "
             "WHERE schema_name NOT IN ('main', 'information_schema', 'pg_catalog')"
-        )["schema_name"].tolist()
+        ).df()["schema_name"].tolist()
     )
 
     for db_dir in db_dirs:
@@ -106,13 +106,13 @@ def load_spider2_lite(
 
         try:
             if overwrite and schema in existing_schemas:
-                engine.conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
-            engine.conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
+                conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            conn.execute(f"CREATE SCHEMA IF NOT EXISTS {schema}")
 
             json_files = sorted(db_dir.glob("*.json"))
             for jf in json_files:
                 table = _sanitize(jf.stem)
-                _load_spider2_lite_json(engine, schema, table, jf)
+                _load_spider2_lite_json(conn, schema, table, jf)
                 logger.debug("Loaded %s → %s.%s", jf.name, schema, table)
 
             loaded_schemas.append(schema)
@@ -173,7 +173,7 @@ def load_spider2(
     pattern = "**/*" if recursive else "*"
     all_files = sorted(p for p in data_dir.glob(pattern) if p.is_file() and p.suffix.lower() in extensions)
 
-    existing_tables = set(engine.execute("SHOW TABLES")["name"].tolist())
+    existing_tables = set(conn.execute("SHOW TABLES")["name"].tolist())
 
     loaded: List[str] = []
     skipped: List[str] = []
@@ -190,8 +190,8 @@ def load_spider2(
         try:
             reader = _reader_expr(file_path)
             if overwrite and table_name in existing_tables:
-                engine.conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            engine.conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM {reader}")
+                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+            conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM {reader}")
             existing_tables.add(table_name)
             loaded.append(table_name)
             logger.info("Loaded '%s' → table '%s'.", file_path.name, table_name)

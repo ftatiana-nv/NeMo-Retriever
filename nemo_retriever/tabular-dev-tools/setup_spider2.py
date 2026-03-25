@@ -31,7 +31,6 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
 from spider2_loader import load_spider2_lite
 
 
@@ -83,12 +82,8 @@ def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     print(f"\n[ddb ] {action} data from {spider2_lite_dir}")
     print(f"[ddb ] Database → {db_path}\n")
 
-    conn = DuckDB({"database": str(db_path)})
-    try:
-        summary = load_spider2_lite(conn, spider2_lite_dir, overwrite=overwrite)
-    finally:
-        conn.close()
-
+    summary = load_spider2_lite(db_path, spider2_lite_dir, overwrite=overwrite)
+    
     print(f"  Databases found : {summary['databases_found']}")
     print(f"  Loaded          : {summary['loaded']}")
     print(f"  Skipped         : {summary['skipped']}")
