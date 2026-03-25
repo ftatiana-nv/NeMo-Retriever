@@ -16,10 +16,9 @@ def load_schema_from_graph(
     schema_name,
     db_node=None,
     is_temp=False,
-    include_deleted: bool = False,
 ):
-    tables_df = get_schema_tables(db_name, schema_name, include_deleted)
-    columns_df = get_schema_columns(db_name, schema_name, include_deleted)
+    tables_df = get_schema_tables(db_name, schema_name)
+    columns_df = get_schema_columns(db_name, schema_name)
     if not tables_df.empty and not columns_df.empty:
         tables_df["is_temp"] = is_temp
         columns_df["is_temp"] = is_temp
@@ -38,11 +37,10 @@ def load_schema_from_graph(
 
 
 def get_schemas_ids_and_names(
-    db_id: str = None, include_deleted: bool = False
+    db_id: str = None, 
 ):
     db_filter = " {id:$db_id}" if db_id else ""
     query = f"""MATCH(db:{Labels.DB}{db_filter})-[:{RelTypes.CONTAINS}]->(s:{Labels.SCHEMA}|{Labels.TEMP_SCHEMA})
-                {"" if include_deleted else "WHERE coalesce(s.deleted, false) = false"}
                 RETURN s.name as schema_name, s.id as schema_id
             """
     result = pd.DataFrame(
@@ -50,19 +48,17 @@ def get_schemas_ids_and_names(
             query=query,
             parameters={
                 "db_id": db_id,
-                "include_deleted": include_deleted,
             },
         )
     )
     return result.to_dict(orient="records")
 
 
-def get_schema_columns(db_name, schema_name, include_deleted: bool = False):
+def get_schema_columns(db_name, schema_name):
     # Use c_id alias: "id" is reserved in Cypher
     query = f"""MATCH (d:{Labels.DB}{{name:$db_name}})-[:{RelTypes.CONTAINS}]->
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{RelTypes.CONTAINS}]->
                 (t:{Labels.TABLE})-[:{RelTypes.CONTAINS}]->(c:{Labels.COLUMN})
-                {"" if include_deleted else " WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and coalesce(c.deleted, false) = false "}
                 WITH d.name as database, s.name as schema, t.name as table_name,
                 c.name as column_name, c.id as c_id, c.data_type as data_type, c.ordinal_position as ordinal_position,
                 c.is_nullable as is_nullable, c.default as default, c.length as length, c.description as comment, c.scale as scale
@@ -81,12 +77,11 @@ def get_schema_columns(db_name, schema_name, include_deleted: bool = False):
     return load_columns(pd.DataFrame(res[0]["columns"] if res[0]["columns"] else []))
 
 
-def get_schema_tables(db_name, schema_name, include_deleted: bool = False):
+def get_schema_tables(db_name, schema_name):
     # Use t_id alias: "id" is reserved in Cypher
     query = f"""MATCH (d:{Labels.DB}{{name:$db_name}})-[:{RelTypes.CONTAINS}]->
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{RelTypes.CONTAINS}]->
                 (t:{Labels.TABLE})
-                {"" if include_deleted else " WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false "}
                 WITH d.name as database, s.name as schema, t.name as table_name, t.id as t_id,
                 t.table_type as table_type, t.row_count as row_count, t.size as size,
                 t.retention_time as retention_time, tostring(t.created) as created,
@@ -135,13 +130,11 @@ def add_schemas_edge(edge, created):
         query = f"""
             CALL apoc.merge.node.eager($from_label, $from_identProps, $v_props, {{id:$v_props.id}})
             yield node as v1
-            set v1.created = case when coalesce(v1.deleted, false) = false then coalesce(v1.created, $created) else $created end
-            set v1.deleted = false
+            set v1.created = coalesce(v1.created, $created)
             with v1
             call apoc.merge.node.eager($to_label, $to_identProps, $u_props, {{id:$u_props.id}})
             yield node as v2
-            set v2.created = case when coalesce(v2.deleted, false) = false then coalesce(v2.created, $created) else $created end
-            set v2.deleted = false
+            set v2.created = coalesce(v2.created, $created)
             MERGE (v1)-[r:{RelTypes.CONTAINS}]->(v2)
             SET r = $optional_edge_props
             """
@@ -213,8 +206,7 @@ def merge_schema_nodes(nodes, created):
                             UNWIND $nodes as node
                             CALL apoc.merge.node.eager(node.label, node.match_props, node.props, {id:node.props.id})
                             yield node as v1
-                            set v1.created = case when coalesce(v1.deleted, false) = false then coalesce(v1.created, $created) else $created end
-                            set v1.deleted = false
+                            set v1.created = coalesce(v1.created, $created)
                             set v1.description = coalesce(v1.description, node.props.description)
                         """
     conn.query_write(

@@ -3,7 +3,7 @@ import pandas as pd
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from nemo_retriever.tabular_data.ingestion.population.graph.utils import chunks
-from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.population.graph.model.reserved_words import Labels, RelTypes
 from .schemas_dal import load_schema_from_graph, add_schemas_edge
 
 logger = logging.getLogger(__name__)
@@ -63,19 +63,11 @@ def add_schemas_edge_batch(edges, created):
             UNWIND $edges as e
             CALL apoc.merge.node.eager([e.from_label], e.from_identProps, e.v_props, {id:e.v_props.id})
             yield node as v1
-            set v1.created = case when coalesce(v1.deleted, false) = false
-            then coalesce(v1.created, $created)
-            else $created end
-
-            set v1.deleted = false
+            set v1.created = coalesce(v1.created, $created)
             with v1, e
             call apoc.merge.node.eager([e.to_label], e.to_identProps, e.u_props, {id:e.u_props.id})
             yield node as v2
-            set v2.created = case when coalesce(v2.deleted, false) = false
-            then coalesce(v2.created, $created)
-            else $created end
-
-            set v2.deleted = false
+            set v2.created = coalesce(v2.created, $created)
             MERGE (v1)-[r:CONTAINS]->(v2)
             SET r = e.optional_edge_props
             """
@@ -313,17 +305,13 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
 
 def get_tables_columns(db_id, schema):
     if db_id is None:
-        query = """MATCH(db:Db)-[:CONTAINS]->(s:Schema{name:$schema})-[:CONTAINS]->
-                    (t:Table)-[:CONTAINS]->(c:Column)
-                    WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
-                        coalesce(c.deleted, false) = false
+        query = f"""MATCH(db:Db)-[:{RelTypes.CONTAINS}]->(s:Schema{{name:$schema}})-[:{RelTypes.CONTAINS}]->
+                    (t:Table)-[:{RelTypes.CONTAINS}]->(c:Column)
                     RETURN t.name as table_name, c.name as col_name
                 """
     else:
-        query = """MATCH(db:Db{id:$db_id})-[:CONTAINS]->(s:Schema{name:$schema})-[:CONTAINS]->
-                    (t:Table)-[:CONTAINS]->(c:Column)
-                    WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
-                        coalesce(c.deleted, false) = false
+        query = f"""MATCH(db:Db{{id:$db_id}})-[:{RelTypes.CONTAINS}]->(s:Schema{{name:$schema}})-[:{RelTypes.CONTAINS}]->
+                    (t:Table)-[:{RelTypes.CONTAINS}]->(c:Column)
                     RETURN t.name as table_name, c.name as col_name
                     """
     result = pd.DataFrame(

@@ -7,7 +7,7 @@ from nemo_retriever.relational_db.neo4j_connection import get_neo4j_conn
 logger = logging.getLogger(__name__)
 
 from nemo_retriever.relational_db.population.graph.utils import chunks
-from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels
+from nemo_retriever.relational_db.population.graph.model.reserved_words import Labels, RelTypes
 from nemo_retriever.relational_db.population.graph.dal.schemas_dal import load_schema_from_graph, add_schemas_edge
 
 conn = get_neo4j_conn()
@@ -45,20 +45,15 @@ def update_node_property(label, node_id, update_properties):
     )
 
 
-def delete_schema(schema_node_id, deleted_time=datetime.now()):
-    query = """MATCH (n:Schema {id: $schema_node_id})-[:CONTAINS]->(t:Table)-[:CONTAINS]->(c:Column)
-               SET n.deleted = True
-               SET n.deleted_time = $deleted_time
-               SET t.deleted = True
-               SET t.deleted_time = $deleted_time
-               SET c.deleted = True
-               SET c.deleted_time = $deleted_time
-             """
+def delete_schema(schema_node_id):
+    query = f"""MATCH (n:Schema {{id: $schema_node_id}})
+               OPTIONAL MATCH (n)-[:{RelTypes.CONTAINS}]->(t:Table)-[:{RelTypes.CONTAINS}]->(c:Column)
+               DETACH DELETE c, t, n
+            """
     conn.query_write(
         query=query,
         parameters={
             "schema_node_id": schema_node_id,
-            "deleted_time": deleted_time,
         },
     )
 
@@ -80,14 +75,12 @@ def add_schemas_edge_batch(edges, created):
             UNWIND $edges as e
             CALL apoc.merge.node.eager([e.from_label], e.from_identProps, e.v_props, {id:e.v_props.id})
             yield node as v1
-            set v1.created = case when coalesce(v1.deleted, false) = false then coalesce(v1.created, $created) else $created end
-            set v1.deleted = false
+            set v1.created = coalesce(v1.created, $created)
             with v1, e
             call apoc.merge.node.eager([e.to_label], e.to_identProps, e.u_props, {id:e.u_props.id})
             yield node as v2
-            set v2.created = case when coalesce(v2.deleted, false) = false then coalesce(v2.created, $created) else $created end
-            set v2.deleted = false
-            MERGE (v1)-[r:CONTAINS]->(v2)
+            set v2.created = coalesce(v2.created, $created)
+            MERGE (v1)-[r:{RelTypes.CONTAINS}]->(v2)
             SET r = e.optional_edge_props
             """
 
@@ -359,17 +352,13 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
 
 def get_tables_columns(db_id, schema):
     if db_id is None:
-        query = """MATCH(db:Db)-[:CONTAINS]->(s:Schema{name:$schema})-[:CONTAINS]->
-                    (t:Table)-[:CONTAINS]->(c:Column)
-                    WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
-                        coalesce(c.deleted, false) = false 
+        query = """MATCH(db:Db)-[:{RelTypes.CONTAINS}]->(s:Schema{name:$schema})-[:{RelTypes.CONTAINS}]->
+                    (t:Table)-[:{RelTypes.CONTAINS}]->(c:Column)
                     RETURN t.name as table_name, c.name as col_name 
                 """
     else:
-        query = """MATCH(db:Db{id:$db_id})-[:CONTAINS]->(s:Schema{name:$schema})-[:CONTAINS]->
-                    (t:Table)-[:CONTAINS]->(c:Column)
-                    WHERE coalesce(s.deleted, false) = false and coalesce(t.deleted, false) = false and
-                        coalesce(c.deleted, false) = false 
+        query = """MATCH(db:Db{id:$db_id})-[:{RelTypes.CONTAINS}]->(s:Schema{name:$schema})-[:{RelTypes.CONTAINS}]->
+                    (t:Table)-[:{RelTypes.CONTAINS}]->(c:Column)
                     RETURN t.name as table_name, c.name as col_name 
                     """
     result = pd.DataFrame(
@@ -385,18 +374,15 @@ def get_tables_columns(db_id, schema):
 
 
 
-def delete_table(table_id, deleted_time=datetime.now()):
-    query = """ MATCH (n:Table {id: $table_id})-[:CONTAINS]->(c:Column)
-                SET n.deleted = True
-                SET n.deleted_time = $deleted_time
-                SET c.deleted = True
-                SET c.deleted_time = $deleted_time
+def delete_table(table_id):
+    query = """ MATCH (n:Table {id: $table_id})
+                OPTIONAL MATCH (n)-[:{RelTypes.CONTAINS}]->(c:Column)
+                DETACH DELETE c, n
             """
     conn.query_write(
         query=query,
         parameters={
             "table_id": table_id,
-            "deleted_time": deleted_time,
         },
     )
 
@@ -433,30 +419,26 @@ def update_properties_in_graph(item_id, node_label, new_parameters):
 
 
 
-def delete_columns_batch(column_ids, deleted_time=datetime.now()):
+def delete_columns_batch(column_ids):
     query = """UNWIND $column_ids as column_id
-               MATCH (c:Column {id: column_id}) 
-               SET c.deleted = True 
-               SET c.deleted_time = $deleted_time
+               MATCH (c:Column {id: column_id})
+               DETACH DELETE c
             """
     conn.query_write(
         query=query,
         parameters={
             "column_ids": column_ids,
-            "deleted_time": deleted_time,
         },
     )
 
 
-def delete_column(column_id, deleted_time=datetime.now()):
-    query = """MATCH (c:Column {id: $column_id}) 
-               SET c.deleted = True 
-               SET c.deleted_time = $deleted_time
+def delete_column(column_id):
+    query = """MATCH (c:Column {id: $column_id})
+               DETACH DELETE c
             """
     conn.query_write(
         query=query,
         parameters={
             "column_id": column_id,
-            "deleted_time": deleted_time,
         },
     )
