@@ -18,6 +18,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Any, Dict, List, Union
 import duckdb
+
 logger = logging.getLogger(__name__)
 
 
@@ -93,7 +94,9 @@ def load_spider2_lite(
         conn.execute(
             "SELECT schema_name FROM information_schema.schemata "
             "WHERE schema_name NOT IN ('main', 'information_schema', 'pg_catalog')"
-        ).df()["schema_name"].tolist()
+        )
+        .df()["schema_name"]
+        .tolist()
     )
 
     for db_dir in db_dirs:
@@ -129,82 +132,5 @@ def load_spider2_lite(
         "skipped": len(skipped_schemas),
         "failed": len(failed),
         "schemas": loaded_schemas,
-        "failures": failed,
-    }
-
-
-def load_spider2(
-    engine: "DuckDB",
-    spider2_data_dir: Union[str, Path],
-    *,
-    recursive: bool = True,
-    overwrite: bool = False,
-    extensions: tuple = (".parquet", ".pq", ".csv", ".json", ".ndjson", ".jsonl"),
-) -> Dict[str, Any]:
-    """Discover and persistently load all Spider2 data files into DuckDB tables.
-
-    Parameters
-    ----------
-    engine:
-        A connected ``DuckDB`` instance.
-    spider2_data_dir:
-        Root directory of the Spider2 data (e.g. ``~/spider2/spider2-duckdb/data``).
-    recursive:
-        Scan subdirectories recursively (default: True).
-    overwrite:
-        Drop and recreate tables that already exist (default: False).
-    extensions:
-        File extensions to include.
-    """
-    data_dir = Path(spider2_data_dir).expanduser().resolve()
-    if not data_dir.is_dir():
-        raise ValueError(f"spider2_data_dir does not exist or is not a directory: {data_dir}")
-
-    def _reader_expr(path: Path) -> str:
-        ext = path.suffix.lower()
-        escaped = str(path).replace("'", "''")
-        if ext in (".parquet", ".pq"):
-            return f"read_parquet('{escaped}')"
-        elif ext == ".csv":
-            return f"read_csv_auto('{escaped}')"
-        else:
-            return f"read_json_auto('{escaped}')"
-
-    pattern = "**/*" if recursive else "*"
-    all_files = sorted(p for p in data_dir.glob(pattern) if p.is_file() and p.suffix.lower() in extensions)
-
-    existing_tables = set(conn.execute("SHOW TABLES")["name"].tolist())
-
-    loaded: List[str] = []
-    skipped: List[str] = []
-    failed: List[Dict[str, str]] = []
-
-    for file_path in all_files:
-        table_name = _sanitize(file_path.stem)
-
-        if table_name in existing_tables and not overwrite:
-            logger.debug("Skipping '%s' — table '%s' already exists.", file_path.name, table_name)
-            skipped.append(table_name)
-            continue
-
-        try:
-            reader = _reader_expr(file_path)
-            if overwrite and table_name in existing_tables:
-                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
-            conn.execute(f"CREATE TABLE {table_name} AS SELECT * FROM {reader}")
-            existing_tables.add(table_name)
-            loaded.append(table_name)
-            logger.info("Loaded '%s' → table '%s'.", file_path.name, table_name)
-        except Exception as exc:
-            logger.error("Failed loading '%s': %s", file_path, exc)
-            failed.append({"file": str(file_path), "error": str(exc)})
-
-    return {
-        "data_dir": str(data_dir),
-        "files_found": len(all_files),
-        "loaded": len(loaded),
-        "skipped": len(skipped),
-        "failed": len(failed),
-        "tables": loaded,
         "failures": failed,
     }

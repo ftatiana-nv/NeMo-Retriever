@@ -83,7 +83,7 @@ def _load_data(spider2_lite_dir: Path, db_path: Path, overwrite: bool) -> dict:
     print(f"[ddb ] Database → {db_path}\n")
 
     summary = load_spider2_lite(db_path, spider2_lite_dir, overwrite=overwrite)
-    
+
     print(f"  Databases found : {summary['databases_found']}")
     print(f"  Loaded          : {summary['loaded']}")
     print(f"  Skipped         : {summary['skipped']}")

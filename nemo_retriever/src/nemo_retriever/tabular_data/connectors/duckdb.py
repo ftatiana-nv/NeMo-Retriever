@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 import duckdb
 import pandas as pd
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class DuckDB:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    
+
     def get_tables(self) -> pd.DataFrame:
         """Return all tables from information_schema as a DataFrame."""
         return self.execute(

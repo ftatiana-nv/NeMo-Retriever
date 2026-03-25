@@ -1,4 +1,3 @@
-import pandas as pd
 from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
 from nemo_retriever.tabular_data.ingestion.graph.utils import (
     load_fks,
@@ -50,9 +49,7 @@ def extract_relational_db_data(params=None):
         data dict with keys: tables, columns, views, pks, fks.
     """
     db_path = (
-        params.connection_string
-        if params is not None and params.connection_string is not None
-        else "./spider2.duckdb"
+        params.connection_string if params is not None and params.connection_string is not None else "./spider2.duckdb"
     )
     settings = {"connection_string": db_path}
     return data_for_populate_tabular(settings)
