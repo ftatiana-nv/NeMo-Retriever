@@ -236,6 +236,13 @@ def test_store_relational_db_in_neo4j_delegates_to_populate(monkeypatch):
     """store_relational_db_in_neo4j calls populate_tabular_data with the exact args."""
     calls: list[dict] = []
 
+    # Patch get_neo4j_conn *before* write_to_graph is imported so that the
+    # module-level `conn = get_neo4j_conn()` calls in schemas_dal and db_dal
+    # do not require NEO4J_URI to be set in the environment.
+    monkeypatch.setattr(
+        "nemo_retriever.tabular_data.neo4j.get_neo4j_conn",
+        lambda: None,
+    )
     monkeypatch.setattr(
         "nemo_retriever.tabular_data.ingestion.write_to_graph.populate_tabular_data",
         lambda data, num_workers, dialect: calls.append({"data": data, "num_workers": num_workers, "dialect": dialect}),
@@ -252,6 +259,11 @@ def test_store_relational_db_in_neo4j_delegates_to_populate(monkeypatch):
 
 def test_store_relational_db_in_neo4j_neo4j_conn_is_optional(monkeypatch):
     """neo4j_conn=None is accepted without error (it is unused by the current implementation)."""
+    # Patch get_neo4j_conn before write_to_graph is imported.
+    monkeypatch.setattr(
+        "nemo_retriever.tabular_data.neo4j.get_neo4j_conn",
+        lambda: None,
+    )
     monkeypatch.setattr(
         "nemo_retriever.tabular_data.ingestion.write_to_graph.populate_tabular_data",
         lambda data, num_workers, dialect: None,
