@@ -22,7 +22,8 @@ For straightforward questions about a single table:
 1. **Identify the table** - Which table has the data?
 2. **Get the schema** - Use `sql_db_schema` to see columns
 3. **Write the query** - SELECT relevant columns with WHERE/LIMIT/ORDER BY
-4. **Execute** - Run with `sql_db_query`
+4. **Execute** - Run with `sql_db_query`  
+   - **Critical:** The argument to `sql_db_query` must be **only** the SQL statement. DuckDB parses the string literally. Do **not** include `` ```sql ``, closing `` ``` ``, or any markdown—those produce `Parser Error: syntax error at or near '`'`.
 5. **Format answer (MANDATORY)**  
    - Call the `answer-formatting` skill with:
      - the exact SQL query you executed
@@ -44,6 +45,7 @@ For questions requiring multiple tables:
 Use `sql_db_schema` for EACH table to find join columns and needed fields.
 
 ### 3. Construct Query
+- If multiple schemas exist in the database, **always** use schema-qualified table names in SQL (``"schema"."table"``) matching the ``CREATE TABLE`` snippets from ``sql_db_schema`` — unqualified names may not resolve to the table you intend.
 - SELECT - Columns and aggregates
 - FROM/JOIN - Connect tables on FK = PK
 - WHERE - Filters before aggregation
@@ -83,4 +85,6 @@ LIMIT 5;
 - After running SQL to answer a question, **always** finish by using the
   `answer-formatting` skill. Do not end with intermediate thoughts or planning
   messages; the final output should be the structured `{sql_code, answer, result}`.
+- **Never** end the run with a long explanatory message that includes ` ``` ` SQL examples
+  or “how to fix” tutorials — only the single JSON object from `answer-formatting`.
 - Never use DML statements (INSERT, UPDATE, DELETE, DROP)
