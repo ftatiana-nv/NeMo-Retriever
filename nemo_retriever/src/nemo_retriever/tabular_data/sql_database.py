@@ -13,7 +13,7 @@ Example
 -------
 ::
 
-    from nemo_retriever.tabular_data.connectors.sql_database import SQLDatabase
+    from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
     class MyConnector(SQLDatabase):
         def __init__(self, connection_string: str) -> None:

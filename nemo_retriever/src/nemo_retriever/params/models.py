@@ -9,7 +9,7 @@ from typing import Literal, Optional, Sequence, Tuple
 import warnings
 
 
-from nemo_retriever.tabular_data.connectors import SQLDatabase
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 RunMode = Literal["inprocess", "batch", "fused", "online"]

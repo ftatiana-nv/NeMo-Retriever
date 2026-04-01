@@ -10,7 +10,7 @@ in-process stubs so the tests run without any infrastructure.
 import pandas as pd
 
 from nemo_retriever.params import TabularExtractParams
-from nemo_retriever.tabular_data.connectors.sql_database import SQLDatabase
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from nemo_retriever.tabular_data.ingestion.extract_data import (
     data_for_populate_tabular,
     extract_tabular_db_data,
