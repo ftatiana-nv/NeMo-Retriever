@@ -21,11 +21,8 @@ from typing import Dict, Any
 from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentState
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
 from search.api.omni.agent.agents.shared.helpers import (
-    get_semantic_candidates_information,
     clean_results,
     update_candidate_properties,
-    categorize_attribute_candidates,
-    fetch_attribute_file_snippets,
 )
 from search.api.omni.dal import expand_info
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
@@ -67,21 +64,17 @@ class CandidateRetrievalAgent(BaseAgent):
     It searches for relevant graph entities and categorizes them.
 
     Retrieval Strategy:
-    - Semantic search over all entity types (terms, metrics, attributes, analyses)
+    - Semantic search over all entity types (customanalyses)
     - Top 10 candidates (balance between coverage and latency)
     - Clean and expand candidate properties
-    - Categorize into graph_supported vs file_attributes
 
     Input Requirements:
     - path_state["normalized_question"]: Normalized English question (from LanguageDetectionAgent)
-    - state["account_id"]: Account ID for data access
-    - state["user_participants"]: User and group IDs for access control
 
     Output:
-    - path_state["retrieved_candidates"]: List of all candidates (for reuse by downstream agents)
-    - path_state["graph_supported_candidates"]: Candidates that can answer from graph
-    - path_state["file_attribute_candidates"]: Candidates that need file lookup
-    - path_state["candidate_summary"]: Human-readable summary for routing agent
+    - path_state["retrieved_candidates"]: All cleaned candidates (custom analyses + columns)
+    - path_state["retrieved_custom_analyses"]: Subset with label ``custom_analysis``
+    - path_state["retrieved_column_candidates"]: Subset with label ``column``
     """
 
     def __init__(self):
@@ -109,43 +102,35 @@ class CandidateRetrievalAgent(BaseAgent):
             Dictionary with:
             - path_state: Contains retrieved candidates and categorization
         """
+        account_id = state["account_id"]
+        user_participants = state.get("user_participants", [])
         path_state = state.get("path_state", {})
 
         question = get_question_for_processing(state)
 
         try:
-            # Run semantic search for graph entities
-            # k=10 balances coverage with latency
-            # Only search semantic entities (terms, attributes, metrics, analyses) for routing decisions
-            # Columns/tables are data elements, not semantic entities needed for routing
+            # Semantic search: custom analyses + columns (see extract_candidates).
             entities = state.get("entities_and_concepts", []) 
             query_no_values = path_state.get(
                 "query_no_values", ""
             )
 
-            candidates_with_entities = extract_candidates(
+            extracted = extract_candidates(
                 entities,
                 query_no_values,
+                state.get("initial_question", "") or "",
             )
 
-
-            raw_candidates = get_semantic_candidates_information(
-                account_id,
-                user_participants,
-                question,
-                k=10,
-                list_of_semantic=[OmniLiteLabels.CUSTOM_ANALYSIS],
-            )
-
-            # Merge both candidate sources and remove duplicates.
-            merged_raw_candidates = []
-            seen_keys = set()
-            for candidate in (candidates_with_entities or []) + (raw_candidates or []):
-                key = (candidate.get("label"), str(candidate.get("id")))
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                merged_raw_candidates.append(candidate)
+            # Support both formats:
+            # - legacy list[{"candidate": ..., "entity": ...}]
+            # - tuple(custom_candidates, column_candidates)
+            if isinstance(extracted, tuple) and len(extracted) == 2:
+                custom_raw, column_raw = extracted
+                merged_raw_candidates = (custom_raw or []) + (column_raw or [])
+            else:
+                merged_raw_candidates = []
+                for item in extracted or []:
+                    merged_raw_candidates.append(item.get("candidate", item))
 
             # Clean and expand candidates
             cleaned_candidates = clean_results(account_id, merged_raw_candidates)
@@ -162,11 +147,23 @@ class CandidateRetrievalAgent(BaseAgent):
                     account_id, candidate, candidates_properties
                 )
 
-            # Store in path_state
+            # Store in path_state (combined + split by label)
             path_state["retrieved_candidates"] = cleaned_candidates
+            path_state["retrieved_custom_analyses"] = [
+                c
+                for c in cleaned_candidates
+                if c.get("label") == OmniLiteLabels.CUSTOM_ANALYSIS
+            ]
+            path_state["retrieved_column_candidates"] = [
+                c
+                for c in cleaned_candidates
+                if c.get("label") == OmniLiteLabels.COLUMN
+            ]
 
             self.logger.info(
-                f"Retrieved {len(cleaned_candidates)} candidates"
+                f"Retrieved {len(cleaned_candidates)} candidates "
+                f"({len(path_state['retrieved_custom_analyses'])} custom_analysis, "
+                f"{len(path_state['retrieved_column_candidates'])} column)"
             )
 
             return {"path_state": path_state}
@@ -177,5 +174,7 @@ class CandidateRetrievalAgent(BaseAgent):
                 f"Candidate retrieval failed: {e}, returning empty candidates"
             )
             path_state["retrieved_candidates"] = []
+            path_state["retrieved_custom_analyses"] = []
+            path_state["retrieved_column_candidates"] = []
 
             return {"path_state": path_state}

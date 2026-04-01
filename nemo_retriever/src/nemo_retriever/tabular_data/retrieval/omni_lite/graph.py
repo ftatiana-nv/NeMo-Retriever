@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import HumanMessage
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_retieval import CandidateRetrievalAgent
+from nemo_retriever.tabular_data.retrieval.omni_lite.agents.entities_extraction import EntitiesExtractionAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import agent_wrapper
 from langchain_openai import ChatOpenAI
 from typing import Literal, Optional, TypedDict
@@ -208,7 +209,7 @@ def create_graph():
  # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
-    action_extraction_agent = ActionInputExtractionAgent() # TODO:take only action input
+    entities_extraction_agent = EntitiesExtractionAgent() 
     retrieval_agent = CandidateRetrievalAgent()
     calculation_search_agent = CalculationSearchAgent() #TODO:take only extract candidates + preretrieved
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -233,7 +234,7 @@ def create_graph():
         "retrieve_candidates", agent_wrapper(retrieval_agent)
     )
     extract_action_input_node = _make_node(
-        "extract_action_input", agent_wrapper(action_extraction_agent)
+        "extract_action_input", agent_wrapper(entities_extraction_agent)
     )
     calculation_search_node = _make_node(
         "calculation_search", agent_wrapper(calculation_search_agent)
