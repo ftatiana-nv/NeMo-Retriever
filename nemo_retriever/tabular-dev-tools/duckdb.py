@@ -15,7 +15,7 @@ Example
 -------
 ::
 
-    from nemo_retriever.tabular_data.connectors.duckdb import DuckDB
+    from duckdb import DuckDB  # run from tabular-dev-tools/
 
     conn = DuckDB("./spider2.duckdb")
     rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
