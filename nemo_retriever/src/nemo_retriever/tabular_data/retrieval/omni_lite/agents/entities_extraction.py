@@ -14,14 +14,13 @@ from pydantic import BaseModel, Field
 from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentState
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
-class ActionInputExtractionModel(BaseModel):
+class EntitiesExtractionModel(BaseModel):
     """
-    Model for extracting action parameters after routing decision is made.
+    Model for extracting entities/concepts and query without values.
     """
 
     required_entity_name: list[str] = Field(
@@ -59,7 +58,7 @@ def get_question_for_processing(state: Dict[str, Any]) -> str:
 
 
 
-class ActionInputExtractionAgent(BaseAgent):
+class EntitiesExtractionAgent(BaseAgent):
     """Extract normalized question and entity/concept terms (calculation-only)."""
 
     def __init__(self):
@@ -102,7 +101,7 @@ Extract:
 """
             extraction_messages = base_messages + [SystemMessage(content=extraction_prompt)]
             extraction_result = invoke_with_structured_output(
-                llm, extraction_messages, ActionInputExtractionModel
+                llm, extraction_messages, EntitiesExtractionModel
             )
             entities_and_concepts = extraction_result.required_entity_name or []
 
