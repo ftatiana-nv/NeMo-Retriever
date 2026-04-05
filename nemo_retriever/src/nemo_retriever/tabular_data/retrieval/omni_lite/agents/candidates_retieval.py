@@ -20,14 +20,14 @@ from typing import Dict, Any
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentState
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from search.api.omni.agent.agents.shared.helpers import (
-    clean_results,
-    update_candidate_properties,
-)
-from search.api.omni.dal import expand_info
+
+
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
-    Labels as OmniLiteLabels,
+    Labels,
+    clean_results,
+    expand_info,
     extract_candidates,
+    update_candidate_properties,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,9 +72,9 @@ class CandidateRetrievalAgent(BaseAgent):
     - path_state["normalized_question"]: Normalized English question (from LanguageDetectionAgent)
 
     Output:
-    - path_state["retrieved_candidates"]: All cleaned candidates (custom analyses + columns)
-    - path_state["retrieved_custom_analyses"]: Subset with label ``custom_analysis``
-    - path_state["retrieved_column_candidates"]: Subset with label ``column``
+    - path_state["retrieved_custom_analyses"]: Cleaned custom_analysis stream (from extract_candidates tuple[0])
+    - path_state["retrieved_column_candidates"]: Cleaned column stream (from extract_candidates tuple[1])
+    - path_state["retrieved_candidates"]: Concatenation of both (for consumers that need one list)
     """
 
     def __init__(self):
@@ -102,8 +102,6 @@ class CandidateRetrievalAgent(BaseAgent):
             Dictionary with:
             - path_state: Contains retrieved candidates and categorization
         """
-        account_id = state["account_id"]
-        user_participants = state.get("user_participants", [])
         path_state = state.get("path_state", {})
 
         question = get_question_for_processing(state)
@@ -121,49 +119,48 @@ class CandidateRetrievalAgent(BaseAgent):
                 state.get("initial_question", "") or "",
             )
 
-            # Support both formats:
-            # - legacy list[{"candidate": ..., "entity": ...}]
-            # - tuple(custom_candidates, column_candidates)
+            # Primary path: tuple (custom_analysis_candidates, column_candidates) — keep streams separate.
             if isinstance(extracted, tuple) and len(extracted) == 2:
                 custom_raw, column_raw = extracted
-                merged_raw_candidates = (custom_raw or []) + (column_raw or [])
+                retrieved_custom_analyses = clean_results(list(custom_raw or []))
+                retrieved_column_candidates = clean_results(list(column_raw or []))
             else:
+                # Legacy: flat list[{"candidate": ..., "entity": ...}] or raw dicts — merge then split by label.
                 merged_raw_candidates = []
                 for item in extracted or []:
                     merged_raw_candidates.append(item.get("candidate", item))
+                cleaned_mixed = clean_results(merged_raw_candidates)
+                retrieved_custom_analyses = [
+                    c
+                    for c in cleaned_mixed
+                    if c.get("label") == Labels.CUSTOM_ANALYSIS
+                ]
+                retrieved_column_candidates = [
+                    c
+                    for c in cleaned_mixed
+                    if c.get("label") == Labels.COLUMN
+                ]
 
-            # Clean and expand candidates
-            cleaned_candidates = clean_results(account_id, merged_raw_candidates)
             ids_and_labels = [
-                {"label": c["label"], "id": c["id"]} for c in cleaned_candidates
+                {"label": c["label"], "id": c["id"]}
+                for c in (retrieved_custom_analyses + retrieved_column_candidates)
             ]
-            candidates_properties = expand_info(
-                account_id, user_participants, ids_and_labels
+            candidates_properties = expand_info(ids_and_labels) if ids_and_labels else {}
+
+            for candidate in retrieved_custom_analyses + retrieved_column_candidates:
+                update_candidate_properties(candidate, candidates_properties)
+
+            path_state["retrieved_custom_analyses"] = retrieved_custom_analyses
+            path_state["retrieved_column_candidates"] = retrieved_column_candidates
+            path_state["retrieved_candidates"] = (
+                retrieved_custom_analyses + retrieved_column_candidates
             )
 
-            # Update candidate properties
-            for candidate in cleaned_candidates:
-                update_candidate_properties(
-                    account_id, candidate, candidates_properties
-                )
-
-            # Store in path_state (combined + split by label)
-            path_state["retrieved_candidates"] = cleaned_candidates
-            path_state["retrieved_custom_analyses"] = [
-                c
-                for c in cleaned_candidates
-                if c.get("label") == OmniLiteLabels.CUSTOM_ANALYSIS
-            ]
-            path_state["retrieved_column_candidates"] = [
-                c
-                for c in cleaned_candidates
-                if c.get("label") == OmniLiteLabels.COLUMN
-            ]
-
+            n_custom = len(retrieved_custom_analyses)
+            n_column = len(retrieved_column_candidates)
             self.logger.info(
-                f"Retrieved {len(cleaned_candidates)} candidates "
-                f"({len(path_state['retrieved_custom_analyses'])} custom_analysis, "
-                f"{len(path_state['retrieved_column_candidates'])} column)"
+                f"Retrieved {n_custom} custom_analysis and {n_column} column candidates "
+                f"(combined total {n_custom + n_column} in retrieved_candidates)"
             )
 
             return {"path_state": path_state}

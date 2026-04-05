@@ -2,6 +2,8 @@ import logging
 from enum import StrEnum
 from itertools import groupby
 
+from langchain_community.vectorstores import PGVector
+
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 # Larger numbers tend to confuse the LLM and increase latency.
 MAX_CALCULATION_CANDIDATES = 15
 
-# k for each omni_semantic_candidates call (qnv, qwv, per-entity).
+# k for each get_semantic_candidates_information call (qnv, qwv, per-entity).
 SEMANTIC_CANDIDATES_K = 10
 
 # Per-attempt batch size when pulling semantic candidates. We keep this modest
@@ -127,6 +129,38 @@ def get_queries_usage_percentiles(node_str="node"):
     usage_percentile_25, usage_percentile_75 = get_usage_percentiles()
     return usage_percentile_25, usage_percentile_75, count_str
 
+
+def clean_results(raw_candidates: list[dict]) -> list[dict]:
+    """
+    Normalize raw semantic hits: require id, dedupe by (label, id), preserve order.
+    """
+    out: list[dict] = []
+    seen: set[tuple[str | None, str]] = set()
+    for c in raw_candidates or []:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        if cid is None:
+            continue
+        key = (c.get("label"), str(cid))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def update_candidate_properties(candidate: dict, props_by_id: dict) -> None:
+    """Merge graph-expanded properties from ``expand_info`` into ``candidate``."""
+    cid = candidate.get("id")
+    if cid is None:
+        return
+    extra = props_by_id.get(cid) or props_by_id.get(str(cid))
+    if isinstance(extra, dict):
+        # values in ``extra`` may be list-wrapped from groupBy; take first dict if so
+        candidate.update(extra)
+
+
 def expand_info(ids_and_labels):
     # define a function for key
     def key_func(k):
@@ -137,7 +171,7 @@ def expand_info(ids_and_labels):
     (
         queries_percentile_25,
         queries_percentile_75,
-        cnt_str,
+        _cnt_str,
     ) = get_queries_usage_percentiles("sql_node")
 
     for label, ids in groupby(ids_and_labels, key_func):
@@ -145,54 +179,16 @@ def expand_info(ids_and_labels):
         query = f"""UNWIND $label_id_pairs as label_id
                     MATCH (n:{label} {{id:label_id.id}})
                     CALL apoc.case([
-                        n:term,
-                            'MATCH (n)-[:term_of]->(attr:attribute)
-                            WITH n, collect(properties(attr)) as attributes
-                            RETURN apoc.map.setKey(properties(n), "attributes", attributes) as item',
-                        n:attribute,
-                            'MATCH(term:term)-[:term_of]->(n)
-                             CALL {{
-                                WITH n
-                                MATCH (n)-[snippet:attr_of]->(item:column|error_node|sql|alias)
-                                WITH n, snippet, item,
-                                     CASE WHEN item:sql OR item:alias THEN TRUE ELSE FALSE END AS complex_snippet
-                                CALL apoc.case([
-                                        item:column, "match(item)<-[:schema]-(table:table) {get_queries_for_column("table", "item", cnt_str)} return  usage",
-                                        item:sql or item:alias , "{get_sql_or_alias_roots(cnt_str)}"
-                                        ],
-                                    "return 0 AS usage",
-                                    {{item:item, account_id:$account_id, usage_percentile_25: $usage_percentile_25,
-                                      usage_percentile_75: $usage_percentile_75, {queries_for_columns_params_keys} }})
-                                    YIELD value as usage
-                                WITH n, snippet, usage.usage as usage, complex_snippet
-                                RETURN collect(distinct {{sql_code: snippet.sql_snippet, snippet_id: snippet.sql_snippet_id, usage: usage}}) as sql,
-                                       reduce(res=FALSE, flag IN collect(complex_snippet) |res OR flag) as complex_attribute
-                                UNION
-                                WITH n
-                                OPTIONAL MATCH (n)-[:attr_of]->(dummy:column|error_node|sql|alias)
-                                WITH n, count(dummy) as snippet_count
-                                WHERE snippet_count = 0
-                                RETURN [] as sql, false as complex_attribute
-                             }}
-                             RETURN apoc.map.setPairs(properties(n),[["owner_id", term.owner_id],["term_name", term.name], ["sql", sql], ["complex_attribute", complex_attribute]]) as item',
-                        n:analysis,
+                        n:custom_analysis,
                             'MATCH(n)-[:analysis_of]->(sql:sql)
                             WITH n, collect(distinct {{sql_code: sql.sql_full_query}}) as sql
                             RETURN apoc.map.setKey(properties(n), "sql", sql) as item',
-                        n:metric,
-                            'OPTIONAL MATCH(n)-[metric_sql:metric_sql]->(attribute:attribute)
-                            WITH n, collect(distinct {{sql_code: metric_sql.sql}}) as sql
-                            RETURN apoc.map.setKey(properties(n), "sql", sql) as item',
-                        n:field,
-                            'MATCH(n)<-[:{"|".join(fields_relationships)}]-(parent) 
-                            RETURN apoc.map.setPairs(properties(n),[["table_name", parent.name],["table_type", parent.type], ["parent_id", parent.id]]) as item',
                         n:column,
-                            'MATCH(n)<-[:schema]-(parent) 
+                            'MATCH(n)<-[:schema]-(parent)
                             RETURN apoc.map.setPairs(properties(n),[["table_name", parent.name],["table_type", parent.type], ["parent_id", parent.id]]) as item'
                         ],
-                        
                         'with n RETURN n{{ .*}} as item ',
-                        {{n:n, account_id:$account_id, sql_type: $sql_type, usage_percentile_25: $usage_percentile_25,
+                        {{n:n, sql_type: $sql_type, usage_percentile_25: $usage_percentile_25,
                         usage_percentile_75: $usage_percentile_75, {queries_for_columns_params_keys} }}
                         )
                     YIELD value as response
@@ -211,72 +207,76 @@ def expand_info(ids_and_labels):
             parameters=params,
         )
         if len(result) > 0:
-            # Add additional info
-            for id, item in result[0]["ids_to_props"].items():
-                if item["type"] == Labels.BT:
-                    term_tables = get_term_tables(
-                        account_id, user_participants, item["id"], 0, 100
-                    )
-                    item["tables"] = term_tables
-                elif item["type"] == Labels.ATTR:
-                    attr_columns = get_attr_columns(
-                        account_id, user_participants, item["id"], 0, 100
-                    )
-                    item["columns"] = attr_columns
-
             results = results | result[0]["ids_to_props"]
 
     return results
+
+
+def search_vector_index(
+    index_name,
+    allowed_ids,
+    user_question,
+    k=30,
+    label_filter: list[str] | None = None,
+):
+    vectorstore = PGVector.from_existing_index(
+        embedding=get_embeddings(account_id),
+        collection_name=index_name,
+        connection_string=pg_conn.connection_string,
+    )
+
+    filter_kwargs = {}
+    if label_filter:
+        filter_kwargs["label"] = {"in": label_filter}
+
+    # PGVector returns distance here; convert to a similarity-style score where
+    # higher is better by applying (1 - distance).
+    result = vectorstore.similarity_search_with_score(
+        user_question,
+        k=k,
+        filter=filter_kwargs,
+    )
+    # double check for account_id
+    return result
 
 
 def get_semantic_candidates_information(
     entity: str,
     k: int = 5,
     threshold: float = 0,
-    list_of_semantic: list = Labels.LIST_OF_SEMANTIC,
+    list_of_semantic: list | None = None,
 ):
-    labels = list_of_semantic
-    results = []
-    
+    """
+    Vector search over indexed nodes, then merge graph properties from ``expand_info``.
 
-    # TODO: use Retriever class to search semantic vector index
-    # nodes_results = search_vector_index(
-    #     "nodes_vector_store",
-    #     allowed_ids,
-    #     entity,
-    #     k=k,
-    #     label_filter=labels,
-    # )
-    # results.extend([item["metadata"] for item in nodes_results])
+    Matches the call shape used by ``extract_candidates``:
+    ``get_semantic_candidates_information(text, k=..., list_of_semantic=[...])``.
+    """
+    if list_of_semantic is None:
+        list_of_semantic = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN]
+    labels = list_of_semantic
+    results: list[dict] = []
+
+    nodes_results = search_vector_index(
+        "nodes_vector_store",
+        entity,
+        k=k,
+        label_filter=labels,
+    )
+    results.extend([item["metadata"] for item in nodes_results])
 
     ids_and_labels = [{"label": x["label"], "id": x["id"]} for x in results]
-    candidates_properties = expand_info(ids_and_labels)
+    props_by_id = expand_info(ids_and_labels)
     for c in results:
-        update_candidate_properties(account_id, c, candidates_properties)
+        cid = c.get("id")
+        if cid is None:
+            continue
+        extra = props_by_id.get(cid) or props_by_id.get(str(cid))
+        if isinstance(extra, dict):
+            c.update(extra)
 
-    # score is similarity, higher is better
     results.sort(key=lambda item: item.get("score", 0), reverse=True)
     return results
-
-
-
-
-
-
-
-
-def _semantic_pull(query: str, list_of_semantic: list[str]) -> list[dict]:
-    text = (query or "").strip()
-    if not text:
-        return []
-    return (
-        get_semantic_candidates_information(
-            text,
-            k=SEMANTIC_CANDIDATES_K,
-            list_of_semantic=list_of_semantic,
-        )
-        or []
-    )
 
 
 def _dedupe_best_score_sort_cap(combined: list[dict]) -> list[dict]:
@@ -305,7 +305,7 @@ def extract_candidates(
     """
     One semantic search per string: ``query_no_values``, ``query_with_values`` (if distinct),
     and each entity name. For each string, pull custom analyses and columns via
-    ``omni_semantic_candidates``. Merge streams, dedupe by (label, id) keeping best score,
+    ``get_semantic_candidates_information``. Merge streams, dedupe by (label, id) keeping best score,
     sort by score, cap at ``MAX_CALCULATION_CANDIDATES`` per stream.
 
     Returns:
@@ -327,8 +327,25 @@ def extract_candidates(
     combined_custom: list[dict] = []
     combined_columns: list[dict] = []
     for text in pulls:
-        combined_custom.extend(_semantic_pull(text, [Labels.CUSTOM_ANALYSIS]))
-        combined_columns.extend(_semantic_pull(text, [Labels.COLUMN]))
+        t = (text or "").strip()
+        if not t:
+            continue
+        combined_custom.extend(
+            get_semantic_candidates_information(
+                t,
+                k=SEMANTIC_CANDIDATES_K,
+                list_of_semantic=[Labels.CUSTOM_ANALYSIS],
+            )
+            or []
+        )
+        combined_columns.extend(
+            get_semantic_candidates_information(
+                t,
+                k=SEMANTIC_CANDIDATES_K,
+                list_of_semantic=[Labels.COLUMN],
+            )
+            or []
+        )
 
     out_custom = _dedupe_best_score_sort_cap(combined_custom)
     out_columns = _dedupe_best_score_sort_cap(combined_columns)
