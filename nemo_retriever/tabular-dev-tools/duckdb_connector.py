@@ -15,7 +15,7 @@ Example
 -------
 ::
 
-    from duckdb import DuckDB  # run from tabular-dev-tools/
+    from duckdb_connector import DuckDB  # run from tabular-dev-tools/
 
     conn = DuckDB("./spider2.duckdb")
     rows = conn.execute("SELECT * FROM Airlines.flights LIMIT 5")
@@ -44,12 +44,14 @@ class DuckDB(SQLDatabase):
         Path to a persistent DuckDB database file, or ``None`` / ``":memory:"``
         for an ephemeral in-memory database (default: in-memory).
     read_only:
-        Open the database in read-only mode (default: False).
+        Open the database in read-only mode (default: True).  Multiple
+        processes can hold a read-only connection simultaneously; set to
+        ``False`` only when you need to write to the file.
     """
 
-    def __init__(self, connection_string: str) -> None:
-        self.conn = duckdb.connect(database=connection_string, read_only=False)
-        logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, False)
+    def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
+        self.conn = duckdb.connect(database=connection_string, read_only=read_only)
+        logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, read_only)
 
     # ------------------------------------------------------------------
     # Execution
