@@ -1,8 +1,10 @@
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import HumanMessage
+from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_preparation import CandidatePreparationAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_retieval import CandidateRetrievalAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.entities_extraction import EntitiesExtractionAgent
+from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_from_semantic import SQLFromSemanticAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import agent_wrapper
 from langchain_openai import ChatOpenAI
 from typing import Literal, Optional, TypedDict
@@ -152,7 +154,7 @@ def route_decision(state: AgentState) -> str:
     # SQL construction agents return "constructable" which needs to map to "validate_sql_query"
     decision_mapping = {
         "constructable": "validate_sql_query",
-        # "unconstructable" maps to "unconstructable" (valid edge from construct_sql_from_multiple_snippets)
+        # "unconstructable" maps to "unconstructable" (valid edge from construct_sql_from_semantic)
         # Other decisions are already valid edge names, so pass through
     }
 
@@ -211,10 +213,9 @@ def create_graph():
     # Routing agents
     entities_extraction_agent = EntitiesExtractionAgent() 
     retrieval_agent = CandidateRetrievalAgent()
-    calculation_search_agent = CalculationSearchAgent() #TODO:take only extract candidates + preretrieved
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
-    sql_from_multiple_snippets_agent = SQLFromMultipleSnippetsAgent() # TODO support only custom analyses
+    sql_from_semantic_agent = SQLFromSemanticAgent()  # TODO: narrow to custom analyses only if needed
     sql_reconstruction_agent = SQLReconstructionAgent()
 
     sql_formatting_agent = SQLResponseFormattingAgent()
@@ -245,9 +246,9 @@ def create_graph():
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
-    construct_sql_from_multiple_snippets_node = _make_node(
-        "construct_sql_from_multiple_snippets",
-        agent_wrapper(sql_from_multiple_snippets_agent),
+    construct_sql_from_semantic_node = _make_node(
+        "construct_sql_from_semantic",
+        agent_wrapper(sql_from_semantic_agent),
     )
     format_sql_response_node = _make_node(
         "format_sql_response", agent_wrapper(sql_formatting_agent)
@@ -290,7 +291,7 @@ def create_graph():
     graph.add_node("calculation_search", calculation_search_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("construct_sql_not_from_snippets", construct_sql_not_from_snippets_node)
-    graph.add_node("construct_sql_from_multiple_snippets", construct_sql_from_multiple_snippets_node)
+    graph.add_node("construct_sql_from_semantic", construct_sql_from_semantic_node)
     graph.add_node("format_sql_response", format_sql_response_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("finalize_text_based_answer", finalize_text_based_answer_node)
@@ -304,12 +305,12 @@ def create_graph():
     graph.add_edge("retrieve_candidates", "extract_action_input")
     graph.add_edge("extract_action_input", "calculation_search")
     graph.add_edge("calculation_search", "prepare_candidates")
-    graph.add_edge("prepare_candidates", "construct_sql_from_multiple_snippets")
+    graph.add_edge("prepare_candidates", "construct_sql_from_semantic")
     
 
 
     graph.add_conditional_edges(
-        "construct_sql_from_multiple_snippets",
+        "construct_sql_from_semantic",
         route_decision,
         {
             "validate_sql_query": "validate_sql_query",

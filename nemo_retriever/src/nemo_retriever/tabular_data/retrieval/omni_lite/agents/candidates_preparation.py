@@ -20,23 +20,82 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
+from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_retieval import get_question_for_processing
 import networkx as nx
 
-from search.api.omni.agent.agents.shared.types import AgentState
-from search.api.omni.agent.agents.base import BaseAgent
-from search.api.omni.agent.agents.shared.helpers import (
+from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentState
+from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+    Labels,
     get_relevant_fks_from_candidates_tables,
     get_relevant_queries,
     get_relevant_tables,
-)
-from enrichments.vector_search.embeddings import get_embeddings
-from search.api.omni.agent.agents.calculation.utils import (
     find_similar_questions,
-    get_question_for_processing,
 )
-from shared.graph.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
+
+
+def _dedupe_custom_then_column(
+    retrieved_custom_analyses: list[dict],
+    retrieved_column_candidates: list[dict],
+) -> list[dict]:
+    """Concatenate custom_analysis then column stream; dedupe by (label, id), order preserved."""
+    seen: set[tuple[str | None, str]] = set()
+    out: list[dict] = []
+    for c in (retrieved_custom_analyses or []) + (retrieved_column_candidates or []):
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("id")
+        if cid is None:
+            continue
+        key = (c.get("label"), str(cid))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
+def _candidates_with_entities_from_path_state(path_state: dict) -> list[dict]:
+    """
+    Build ``[{"candidate": ..., "entity": ...}, ...]`` for FK/table prep.
+
+    - Legacy: non-empty ``path_state["candidates"]`` is returned as-is.
+    - Retrieval (CandidateRetrievalAgent): merge ``retrieved_custom_analyses`` then
+      ``retrieved_column_candidates`` (canonical two streams).
+    - Fallback: ``retrieved_candidates`` if split lists were never written (older state).
+    """
+    legacy = path_state.get("candidates")
+    if legacy:
+        return legacy
+
+    has_split = (
+        "retrieved_custom_analyses" in path_state
+        or "retrieved_column_candidates" in path_state
+    )
+    if has_split:
+        flat = _dedupe_custom_then_column(
+            list(path_state.get("retrieved_custom_analyses") or []),
+            list(path_state.get("retrieved_column_candidates") or []),
+        )
+    else:
+        flat = list(path_state.get("retrieved_candidates") or [])
+
+    return [{"candidate": c, "entity": None} for c in flat]
+
+
+def _optional_embeddings_client(account_id: str):
+    """Embeddings are wired in some deployments; absent in the open-source stub."""
+    try:
+        from nemo_retriever.tabular_data.retrieval.omni_lite import utils as omni_utils
+
+        ge = getattr(omni_utils, "get_embeddings", None)
+        if callable(ge):
+            return ge(account_id, is_embeddings=True)
+    except Exception:
+        pass
+    return None
 
 
 class CandidatePreparationAgent(BaseAgent):
@@ -50,7 +109,9 @@ class CandidatePreparationAgent(BaseAgent):
     - Filtered complex candidates with SQL snippets
 
     Input Requirements:
-    - path_state["candidates"]: List of candidates
+    - Either path_state["candidates"] (legacy list of ``{candidate, entity}``), or
+      retrieval output from CandidateRetrievalAgent: ``retrieved_custom_analyses`` and
+      ``retrieved_column_candidates`` (preferred), or legacy ``retrieved_candidates`` only
     - state["initial_question"]: User's question
     - state["account_id"]: Account ID
     - state["user_participants"]: User IDs
@@ -73,10 +134,14 @@ class CandidatePreparationAgent(BaseAgent):
         super().__init__("candidate_preparation")
 
     def validate_input(self, state: AgentState) -> bool:
-        """Validate that candidates are available."""
+        """Validate that retrieval (or legacy candidates) produced at least one hit."""
         path_state = state.get("path_state", {})
-        if not path_state.get("candidates"):
-            self.logger.warning("No candidates found for candidate preparation")
+        prepared = _candidates_with_entities_from_path_state(path_state)
+        if not prepared:
+            self.logger.warning(
+                "No candidates for preparation: set retrieved_custom_analyses / "
+                "retrieved_column_candidates, retrieved_candidates, or legacy candidates"
+            )
             return False
         return True
 
@@ -95,29 +160,28 @@ class CandidatePreparationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        account_id = state["account_id"]
-        user_id = state["user_participants"][0] if state["user_participants"] else None
-        candidates_with_entities = path_state["candidates"]
+        candidates_with_entities = _candidates_with_entities_from_path_state(
+            path_state
+        )
 
+        n_custom = len(path_state.get("retrieved_custom_analyses") or [])
+        n_cols = len(path_state.get("retrieved_column_candidates") or [])
         self.logger.info(
-            f"Preparing candidates for {len(candidates_with_entities)} candidates"
+            f"Preparing {len(candidates_with_entities)} wrapped candidates "
+            f"from {n_custom} custom_analysis + {n_cols} column (FK/table context)"
         )
 
         # Get tables and FKs with entity information
         tables_with_entities, fks_with_entities = (
             get_relevant_fks_from_candidates_tables(
-                account_id, candidates_with_entities
+                candidates_with_entities
             )
         )
 
         # Extract flat tables for additional table search (exclude tables we already have)
-        exclude_ids = [item["table"]["id"] for item in tables_with_entities]
         additional_tables, additional_fks = get_relevant_tables(
-            account_id,
-            state["user_participants"],
             question,
             k=5,
-            exclude_ids=exclude_ids,
         )
 
         # Add additional tables with entity=None (they're from question search, not entity-specific)
@@ -161,25 +225,22 @@ class CandidatePreparationAgent(BaseAgent):
         # Get relevant queries for context (extract just candidate objects)
         candidates = [item["candidate"] for item in candidates_with_entities]
         relevant_queries = get_relevant_queries(
-            account_id,
             candidates,
-            user_participants=state["user_participants"],
             query_tag="illumex-omni",
         )
         self.logger.info(f"Found {len(relevant_queries)} relevant queries")
 
         # Find similar questions from conversation history
         similar_questions = []
-        embeddings_client = get_embeddings(account_id, is_embeddings=True)
-        if embeddings_client and user_id:
-            similar_questions = find_similar_questions(
-                embeddings_client.embed_query(question), user_id
-            )
+        embeddings_client = _optional_embeddings_client()
+        similar_questions = find_similar_questions(
+            embeddings_client.embed_query(question), 
+        )
         self.logger.info(
             f"Found {len(similar_questions)} similar questions from conversations"
         )
 
-        # Filter complex candidates (those with SQL snippets, metrics, analyses)
+        # Filter complex candidates (SQL snippets, certified assets, rich column context)
         complex_candidates = [
             {
                 "name": x["name"],
@@ -188,10 +249,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "description": x.get("description") or "",
             }
             for x in candidates
-            if x.get("complex_attribute", False)
-            or x.get("label") in [Labels.ANALYSIS, Labels.METRIC]
-            or x.get("certified", "pending") == "certified"
-            or len(x.get("documents", [])) > 0
+            if x.get("label") == Labels.CUSTOM_ANALYSIS
         ]
         self.logger.info(f"Filtered {len(complex_candidates)} complex candidates")
 
@@ -377,7 +435,7 @@ class CandidatePreparationAgent(BaseAgent):
         for x in candidates:
             if (
                 x.get("complex_attribute", False)
-                or x.get("label") in [Labels.ANALYSIS, Labels.METRIC]
+                or x.get("label") == Labels.CUSTOM_ANALYSIS
                 or x.get("certified", "pending") == "certified"
                 or len(x.get("documents", [])) > 0
             ):
