@@ -34,7 +34,7 @@ class TabularIngestOperator(AbstractOperator, CPUOperator):
     5. ``generate_tabular_descriptions``   (future)
     6. ``fetch_tabular_embedding_dataframe`` → Ray Dataset
     7. :class:`_BatchEmbedActor`         — GPU/remote batch embedding
-    8. :class:`_LanceDBWriteActor`       — streaming write to LanceDB
+    8. ``handle_lancedb``               — write embedded rows to LanceDB
     """
 
     def __init__(
@@ -62,7 +62,7 @@ class TabularIngestOperator(AbstractOperator, CPUOperator):
         import ray
         import ray.data as rd
 
-        from nemo_retriever.ingest_modes.batch import _BatchEmbedActor, _LanceDBWriteActor
+        from nemo_retriever.text_embed.operators import _BatchEmbedActor
         from nemo_retriever.params.utils import build_embed_kwargs
         from nemo_retriever.tabular_data.ingestion.extract_data import (
             extract_tabular_db_data,
@@ -112,39 +112,20 @@ class TabularIngestOperator(AbstractOperator, CPUOperator):
                 fn_constructor_kwargs={"params": self._embed_params},
             )
 
-        # Step 8: write to LanceDB
-        if self._vdb_params is not None:
-            tabular_vdb_params = self._vdb_params.model_copy(
-                update={"lancedb": self._vdb_params.lancedb.model_copy(update={"table_name": _TABULAR_TABLE})}
-            )
-            rd_dataset = rd_dataset.map_batches(
-                _LanceDBWriteActor,
-                batch_format="pandas",
-                num_cpus=1,
-                compute=rd.ActorPoolStrategy(size=1),
-                fn_constructor_kwargs={"params": tabular_vdb_params},
-            )
-
-        result = rd_dataset.count()
+        # Step 8: materialise the dataset and write to LanceDB
+        result_df = rd_dataset.to_pandas()
 
         if self._vdb_params is not None:
-            import lancedb as _lancedb
-
-            from nemo_retriever.vector_store.lancedb_store import LanceDBConfig, create_lancedb_index
+            from nemo_retriever.vector_store.lancedb_store import handle_lancedb
 
             lancedb_params = self._vdb_params.lancedb
-            cfg = LanceDBConfig(
+            handle_lancedb(
+                result_df,
                 uri=lancedb_params.lancedb_uri,
                 table_name=_TABULAR_TABLE,
-                overwrite=lancedb_params.overwrite,
-                create_index=lancedb_params.create_index,
             )
-            if cfg.create_index:
-                db = _lancedb.connect(uri=cfg.uri)
-                table = db.open_table(cfg.table_name)
-                create_lancedb_index(table, cfg=cfg)
 
-        return result
+        return len(result_df)
 
     def postprocess(self, data: Any, **kwargs: Any) -> Any:
         return data
