@@ -306,3 +306,52 @@ def get_sql_tool_response_top_k(
     if result_dict is None:
         result_dict = _dict_to_sql_result(None)
     return result_dict
+
+
+def get_omni_deep_agent_sql_response(
+    question: str,
+    top_k: int = 15,
+    pg_connection_string: str = "",
+    language: str = "english",
+) -> dict:
+    """Run the Omni SQL generation pipeline via Deep Agent 2 (no LangGraph).
+
+    Implements the exact omni_lite LangGraph flow — retrieve candidates,
+    extract entities, search, prepare, construct SQL, validate syntax,
+    validate intent, reconstruct on failure, format, execute, and respond —
+    but orchestrated by a Deep Agent calling tools instead of LangGraph nodes.
+
+    Parameters
+    ----------
+    question:
+        Natural-language question to answer with SQL.
+    top_k:
+        Number of LanceDB hits to retrieve in the first retrieval step.
+        Passed via the ``OMNI_RETRIEVER_TOP_K`` env var (overrides this arg
+        if set externally; this sets the env default for the current call).
+    pg_connection_string:
+        Optional PostgreSQL DSN for SQL execution by the pipeline's
+        ``execute_sql_query`` step.
+    language:
+        Target response language (default: ``"english"``).
+
+    Returns
+    -------
+    dict
+        ``{"sql_code": str, "answer": str, "result": Any}``
+    """
+    import os as _os
+
+    # Allow caller to influence retriever top_k via env var without mutating
+    # global state permanently.
+    _os.environ.setdefault("OMNI_RETRIEVER_TOP_K", str(top_k))
+
+    from nemo_retriever.tabular_data.retrieval.deep_agent2.runtime import (
+        run_omni_pipeline,
+    )
+
+    return run_omni_pipeline(
+        question=question,
+        pg_connection_string=pg_connection_string,
+        language=language,
+    )
