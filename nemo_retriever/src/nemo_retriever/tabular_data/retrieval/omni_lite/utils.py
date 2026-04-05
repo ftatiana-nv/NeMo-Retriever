@@ -1,3 +1,4 @@
+import json
 import logging
 from enum import StrEnum
 from itertools import groupby
@@ -234,6 +235,89 @@ def expand_info(ids_and_labels):
     return results
 
 
+def _parse_lancedb_row_metadata(hit: dict) -> dict:
+    """Normalize LanceDB hit ``metadata`` (dict or JSON string) to a flat dict."""
+    raw = hit.get("metadata")
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _l2_distance_to_score(distance: object | None) -> float:
+    """Map LanceDB L2 distance (lower is better) to a positive score (higher is better)."""
+    if distance is None:
+        return 0.0
+    try:
+        d = float(distance)
+    except (TypeError, ValueError):
+        return 0.0
+    return 1.0 / (1.0 + max(d, 0.0))
+
+
+def _hits_to_semantic_rows(hits: list[dict], allowed_labels: set[str], k: int) -> list[dict]:
+    """Turn raw LanceDB hits into candidate dicts; optional filter by ``label`` in metadata."""
+    rows: list[dict] = []
+    for hit in hits:
+        meta = _parse_lancedb_row_metadata(hit)
+        top_label = hit.get("label")
+        lab = top_label if top_label is not None else meta.get("label")
+        if allowed_labels and str(lab) not in allowed_labels:
+            continue
+        score = _l2_distance_to_score(hit.get("_distance"))
+        row = {**meta, "score": score}
+        if top_label is not None and "label" not in meta:
+            row["label"] = top_label
+        if row.get("id") is None:
+            continue
+        rows.append(row)
+        if len(rows) >= int(k):
+            break
+    return rows[: int(k)]
+
+
+def search_lancedb_semantic_index(
+    user_question: str,
+    k: int = 30,
+    label_filter: list[str] | None = None,
+) -> list[dict]:
+    """
+    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override.OmniLiteRetriever`
+    (same stack as ``generate_sql.get_sql_tool_response_top_k``), then keep rows
+    whose ``label`` matches ``label_filter`` (top-level column or parsed ``metadata``).
+
+    Env: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
+    ``OMNI_SEMANTIC_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
+    """
+    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
+
+    uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
+    table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
+    allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
+    fetch_k = max(int(k) * 10, int(k) + 40, 50)
+
+    retriever = OmniLiteRetriever(
+        lancedb_uri=uri,
+        lancedb_table=table_name,
+        top_k=fetch_k,
+    )
+
+    hits = retriever.query(
+        user_question,
+        lancedb_uri=uri,
+        lancedb_table=table_name,
+        label_in=sorted(allowed_labels) if allowed_labels else None,
+    )
+
+    return _hits_to_semantic_rows(hits, allowed_labels, int(k))
+
+
 def search_vector_index(
     index_name,
     allowed_ids,
@@ -269,7 +353,7 @@ def get_semantic_candidates_information(
     list_of_semantic: list | None = None,
 ):
     """
-    Vector search over indexed nodes, then merge graph properties from ``expand_info``.
+    Vector search over LanceDB, then merge graph properties from ``expand_info``.
 
     Matches the call shape used by ``extract_candidates``:
     ``get_semantic_candidates_information(text, k=..., list_of_semantic=[...])``.
@@ -279,13 +363,12 @@ def get_semantic_candidates_information(
     labels = list_of_semantic
     results: list[dict] = []
 
-    nodes_results = search_vector_index(
-        "nodes_vector_store",
+    nodes_results = search_lancedb_semantic_index(
         entity,
         k=k,
         label_filter=labels,
     )
-    results.extend([item["metadata"] for item in nodes_results])
+    results.extend(nodes_results)
 
     ids_and_labels = [{"label": x["label"], "id": x["id"]} for x in results]
     props_by_id = expand_info(ids_and_labels)

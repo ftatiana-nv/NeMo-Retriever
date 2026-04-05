@@ -6,12 +6,14 @@ import subprocess
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.runnables.graph import MermaidDrawMethod
+from nemo_retriever.tabular_data.retrieval.deep_agent.prompts import main_system_prompt_template
+from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import ONTOLOGY, get_ontology_prompt
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
-from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentPayload, create_graph
+from nemo_retriever.tabular_data.retrieval.omni_lite.graph import AgentPayload, AgentState, create_graph
 
 
 
-logger = logging.getLogger("langchain agent main")
+logger = logging.getLogger(__name__)
 # Get LLM client with automatic provider selection and fallback (LangChain)
 
 try:
@@ -84,9 +86,9 @@ if os.environ["LMX_ENV"] == "development":
             logger.warning("Skipping graph visualization generation...")
 
 
-def get_agent_response(account_id: str, payload: AgentPayload):
+def get_agent_response(payload: AgentPayload):
     now = datetime.now()
-    ontology = get_account_ontology(account_id, user_participants)
+    ontology = ONTOLOGY
     main_system_prompt = main_system_prompt_template.format(
         date=now,
         ontology_prompt=get_ontology_prompt(ontology),
@@ -99,45 +101,21 @@ def get_agent_response(account_id: str, payload: AgentPayload):
             chat_history.add_ai_message(history["response"])
         messages.extend(chat_history.messages)
     messages.append(HumanMessage(content=payload["question"]))
-    dialects = get_dialects_by_account_id(account_id, is_omni=True)
+    dialects = ["duckdb"]
     state: AgentState = {
-        "pg_connection": get_postgres_conn(),
+        # "pg_connection": get_postgres_conn(),
         "llm": llm_client,
-        "account_id": account_id,
-        "user_participants": user_participants,
         "auto_choose": payload.get("auto_choose_option"),
-        "pii_access": omni_settings[OmniSettings.PII_ACCESS],
         "dialects": dialects,
-        "is_technical": payload.get("is_technical"),
         "source": payload.get("source"),
         "initial_question": payload["question"],
         "messages": messages,
         "decision": "decide",
         "intermediate_output": "",  # Deprecated - use path_state instead
         "thoughts": "",
-        "path_state": {
-            "action": payload.get("action"),
-            "candidate_id": payload.get("candidate_id"),
-            "candidate_name": payload.get("candidate_name"),
-            "candidate_label": payload.get("candidate_label"),
-            "candidate_zone_id": payload.get("candidate_zone_id"),
-            "initial_response": payload.get("initial_response"),
-            "unstructured": payload.get("unstructured"),
-            "not_to_check_in_files": payload.get("not_to_check_in_files", False),
-        },
+        "path_state": {},
     }
-    # Build file name mapping once and store in state
-    file_names_to_display = {}
-    if payload.get("unstructured"):
-        # For regular unstructured, use files from payload
-        for file_obj in payload.get("unstructured", []):
-            internal_name = os.path.basename(file_obj["name"])
-            display_name = file_obj.get("displayName", internal_name)
-            ext = (file_obj.get("type") or "").lower() or os.path.splitext(
-                display_name
-            )[1].lstrip(".").lower()
-            file_names_to_display[internal_name] = f"{display_name}.{ext}"
-    state["path_state"]["file_names_to_display"] = file_names_to_display
+
 
     # Stream through the graph and accumulate state
     final_state = state.copy()

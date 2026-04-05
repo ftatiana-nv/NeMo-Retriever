@@ -96,7 +96,7 @@ class CandidateRetrievalAgent(BaseAgent):
             extracted = extract_candidates(
                 entities,
                 query_no_values,
-                state.get("initial_question", "") or "",
+                question,
             )
 
             # Primary path: tuple (custom_analysis_candidates, column_candidates) — keep streams separate.

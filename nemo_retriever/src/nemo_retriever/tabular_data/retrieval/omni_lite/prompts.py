@@ -7,9 +7,37 @@ ONTOLOGY = """
              {"name": "purchased items with discount", "description": "Use Sales.Orders"}, 
              {"name": "best selling products with filters", "description": "Do NOT use REPORTS.MV_TOPSELLINGPRODUCTS. Use REPORTS.TOP_SELLING_PRODUCTS"}, 
              {"name": "deals and discounts", "description": "Use SALES.SPECIALDEALS"}, 
-             {"name": "transactions", "description": "When asking about transactions in general or specifically about successful transactions (and not unfinished ones) - include the isFinalized filter."}}, 
+             {"name": "transactions", "description": "When asking about transactions in general or specifically about successful transactions (and not unfinished ones) - include the isFinalized filter."}]}}, 
              "omniSettings": {"visualizeSqlResults": true, "summarized": true}}
 """
+
+
+def get_ontology_prompt(ontology):
+    if not ontology:
+        return ""
+
+    ontology_prompt = ""
+
+    company_overview = ontology.get("overview", "")
+    if company_overview:
+        ontology_prompt += f"Company overview: {company_overview}\n"
+
+    industry_list = ontology.get("industry", [])
+    if len(industry_list) > 0:
+        industry_label = "industry" if len(industry_list) == 1 else "industries"
+        industries = ", ".join(industry_list)
+        ontology_prompt += f"within the context of the {industries} {industry_label}\n"
+
+    definitions_list = ontology.get("dictionary", [])
+    if len(definitions_list) > 0:
+        ontology_prompt += "Here are the relevant industry definitions:\n"
+        dictionary_items = [
+            f"{item['name']}: {item['description']}" for item in definitions_list
+        ]
+        ontology_prompt += "\n".join(dictionary_items)
+
+    return ontology_prompt + "\n"
+
 
 def create_sql_from_semantic_prompt(complex_candidates: list) -> str:
     """

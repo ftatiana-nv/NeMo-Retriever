@@ -14,7 +14,7 @@ from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_reconstruction i
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_unconstructable import CalculationUnconstructableAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_validation_agent import SQLValidationAgent
 from nemo_retriever.tabular_data.retrieval.omni_lite.base import agent_wrapper
-from langchain_openai import ChatOpenAI
+from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from typing import Literal, Optional, TypedDict
 
 
@@ -47,7 +47,7 @@ class AgentPayload(TypedDict):
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
-    llm: ChatOpenAI
+    llm: ChatNVIDIA
     pg_connection: object  # TODO lancedb
     initial_question: str
     messages: list[HumanMessage]
