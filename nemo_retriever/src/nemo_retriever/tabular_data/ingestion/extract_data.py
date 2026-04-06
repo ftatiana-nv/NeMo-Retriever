@@ -1,5 +1,5 @@
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
-from nemo_retriever.tabular_data.ingestion.graph.utils import (
+from nemo_retriever.tabular_data.ingestion.utils import (
     normalize_fks,
     normalize_pks,
     normalize_tables,

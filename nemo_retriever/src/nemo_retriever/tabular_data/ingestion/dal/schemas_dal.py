@@ -1,16 +1,16 @@
 import pandas as pd
 import logging
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from nemo_retriever.tabular_data.ingestion.graph.utils import (
+from nemo_retriever.tabular_data.ingestion.utils import (
     normalize_tables,
     normalize_columns,
 )
-from nemo_retriever.tabular_data.ingestion.graph.model.node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
+from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     RelTypes,
 )
-from nemo_retriever.tabular_data.ingestion.graph.model.schema import Schema
+from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 
 conn = get_neo4j_conn()
 logger = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 import logging
 import uuid
 from json import JSONEncoder
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 

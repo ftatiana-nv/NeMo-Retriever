@@ -1,7 +1,7 @@
 import logging
 
-from nemo_retriever.tabular_data.ingestion.graph.model.node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import (
+from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Props,
     Labels,
 )

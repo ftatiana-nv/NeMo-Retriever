@@ -1,9 +1,9 @@
 import logging
 import uuid
-from nemo_retriever.tabular_data.ingestion.graph.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
 import pandas as pd
 import numpy as np
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 pd.options.mode.chained_assignment = None
 

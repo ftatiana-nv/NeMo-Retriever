@@ -1,8 +1,8 @@
 from datetime import datetime
 
-from nemo_retriever.tabular_data.ingestion.graph.model.reserved_words import Labels
-from nemo_retriever.tabular_data.ingestion.graph.model.node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.graph.model.schema import Schema
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 import logging
 
 logger = logging.getLogger(__name__)
