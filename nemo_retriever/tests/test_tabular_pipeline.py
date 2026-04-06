@@ -1,6 +1,6 @@
 """Unit tests for the tabular ingestion pipeline functions.
 
-Covers the standalone functions that ``TabularIngestOperator`` composes:
+Covers the standalone functions used by the tabular ingestion operators:
 extract from DB, normalize, store in Neo4j.
 
 All external databases (DuckDB, Neo4j, etc.) are replaced with lightweight
