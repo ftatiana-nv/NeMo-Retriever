@@ -5,7 +5,7 @@ from nemo_retriever.tabular_data.ingestion.utils import (
     normalize_tables,
     normalize_columns,
 )
-from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     RelTypes,

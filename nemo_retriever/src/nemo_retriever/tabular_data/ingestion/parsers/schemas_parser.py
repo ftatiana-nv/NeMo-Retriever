@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-from nemo_retriever.tabular_data.ingestion.model.node import Neo4jNode
+from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 import logging
 
