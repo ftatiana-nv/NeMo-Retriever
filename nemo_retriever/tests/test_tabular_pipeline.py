@@ -210,25 +210,9 @@ def test_store_relational_db_in_neo4j_delegates_to_populate(monkeypatch):
     )
 
     dummy_data = {k: pd.DataFrame() for k in ("tables", "columns", "views", "pks", "fks")}
-    store_relational_db_in_neo4j(data=dummy_data, neo4j_conn=None)
+    store_relational_db_in_neo4j(data=dummy_data)
 
     assert len(calls) == 1
     assert calls[0]["data"] is dummy_data
     assert calls[0]["num_workers"] == 4
     assert calls[0]["dialect"] == "duckdb"
-
-
-def test_store_relational_db_in_neo4j_neo4j_conn_is_optional(monkeypatch):
-    """neo4j_conn=None is accepted without error (it is unused by the current implementation)."""
-    # Patch get_neo4j_conn before write_to_graph is imported.
-    monkeypatch.setattr(
-        "nemo_retriever.tabular_data.neo4j.get_neo4j_conn",
-        lambda: None,
-    )
-    monkeypatch.setattr(
-        "nemo_retriever.tabular_data.ingestion.write_to_graph.populate_tabular_data",
-        lambda data, num_workers, dialect: None,
-    )
-
-    dummy_data = {k: pd.DataFrame() for k in ("tables", "columns", "views", "pks", "fks")}
-    store_relational_db_in_neo4j(data=dummy_data)  # neo4j_conn defaults to None
