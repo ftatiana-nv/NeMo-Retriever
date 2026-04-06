@@ -1,7 +1,6 @@
 """
 Entity extraction for omni-lite retrieval.
-
-This simplified agent is calculation-only. It stores:
+It stores:
 - normalized_question
 - extracted entities/concepts from the question
 """
@@ -29,8 +28,7 @@ class EntitiesExtractionModel(BaseModel):
     required_entity_name: list[str] = Field(
         ...,
         description="List of primary entities or concepts mentioned in the question. "
-        "Ignore time frames, quantities, or constants. "
-        "Exclude system-level labels like 'term', 'metric', etc.",
+        "Ignore time frames, quantities, or constants. ",
     )
     query_no_values: str = Field(
         ...,
@@ -60,12 +58,11 @@ class EntitiesExtractionAgent(BaseAgent):
         question = get_question_for_processing(state)
 
         try:
-            normalized_question = (question or "").strip()
             extraction_prompt = f"""
 You are extracting entities and concepts from a user question for SQL calculation.
 
 User Question:
-{normalized_question}
+{question}
 
 Extract:
 1) required_entity_name: list of entities/concepts mentioned in the question.
@@ -85,7 +82,6 @@ Extract:
             )
             entities_and_concepts = extraction_result.required_entity_name or []
 
-            path_state["normalized_question"] = normalized_question
             path_state["query_no_values"] = extraction_result.query_no_values
             path_state["entities_and_concepts"] = entities_and_concepts
 
@@ -98,9 +94,7 @@ Extract:
             self.logger.warning(
                 f"Entity extraction failed: {e}, using fallback values"
             )
-            normalized_question = (question or "").strip()
-            path_state["normalized_question"] = normalized_question
-            path_state["query_no_values"] = normalized_question
+            path_state["query_no_values"] = question
             path_state["entities_and_concepts"] = []
 
             return {"path_state": path_state}

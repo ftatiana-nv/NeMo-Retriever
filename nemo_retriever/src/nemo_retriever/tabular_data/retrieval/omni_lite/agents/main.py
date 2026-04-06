@@ -25,73 +25,72 @@ except ValueError as e:
 graph = create_graph()
 app = graph.compile()
 
-if os.environ["LMX_ENV"] == "development":
-    # Generate graph visualization using local rendering method
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    graph_image_path = os.path.abspath(
-        os.path.join(current_dir, "..", "omni_agent_graph.png")
-    )
-    Path(os.path.dirname(graph_image_path)).mkdir(parents=True, exist_ok=True)
 
-    def render_with_mmdc(out_path: str, mermaid_text: str):
-        # Use mmdc CLI to render mermaid diagrams (no-browser fallback)
-        # Use scale factor of 4 and larger dimensions for high resolution
-        import tempfile
-        import pathlib
+# Generate graph visualization using local rendering method
+current_dir = os.path.dirname(os.path.abspath(__file__))
+graph_image_path = os.path.abspath(
+    os.path.join(current_dir, "..", "omni_agent_graph.png")
+)
+Path(os.path.dirname(graph_image_path)).mkdir(parents=True, exist_ok=True)
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mmd") as tmp:
-            pathlib.Path(tmp.name).write_text(mermaid_text, encoding="utf-8")
-            subprocess.run(
-                [
-                    "mmdc",
-                    "-i",
-                    tmp.name,
-                    "-o",
-                    out_path,
-                    "-s",
-                    "4",  # Scale factor of 4 for high resolution
-                    "-w",
-                    "3200",  # Width of 3200px
-                    "-H",
-                    "2400",  # Height of 2400px
-                ],
-                check=True,
-            )
+def render_with_mmdc(out_path: str, mermaid_text: str):
+    # Use mmdc CLI to render mermaid diagrams (no-browser fallback)
+    # Use scale factor of 4 and larger dimensions for high resolution
+    import tempfile
+    import pathlib
 
-    # Try pyppeteer first, but fall back to mmdc if it fails
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mmd") as tmp:
+        pathlib.Path(tmp.name).write_text(mermaid_text, encoding="utf-8")
+        subprocess.run(
+            [
+                "mmdc",
+                "-i",
+                tmp.name,
+                "-o",
+                out_path,
+                "-s",
+                "4",  # Scale factor of 4 for high resolution
+                "-w",
+                "3200",  # Width of 3200px
+                "-H",
+                "2400",  # Height of 2400px
+            ],
+            check=True,
+        )
+
+# Try pyppeteer first, but fall back to mmdc if it fails
+try:
+    import importlib
+
+    importlib.import_module("pyppeteer")
+
+    png_bytes = app.get_graph().draw_mermaid_png(
+        draw_method=MermaidDrawMethod.PYPPETEER
+    )  # pyright: ignore[reportUndefinedVariable]
+    with open(graph_image_path, "wb") as f:
+        f.write(png_bytes)
+    logger.info("Graph visualization saved (local Pyppeteer)")
+except Exception:
+    # Pyppeteer failed or not available, try mmdc CLI fallback
     try:
-        import importlib
-
-        importlib.import_module("pyppeteer")
-
-        png_bytes = app.get_graph().draw_mermaid_png(
-            draw_method=MermaidDrawMethod.PYPPETEER
-        )  # pyright: ignore[reportUndefinedVariable]
-        with open(graph_image_path, "wb") as f:
-            f.write(png_bytes)
-        logger.info("Graph visualization saved (local Pyppeteer)")
-    except Exception:
-        # Pyppeteer failed or not available, try mmdc CLI fallback
-        try:
-            mermaid_src = app.get_graph().draw_mermaid()
-            render_with_mmdc(graph_image_path, mermaid_src)
-            logger.info("Graph visualization saved (mmdc CLI)")
-        except FileNotFoundError:
-            logger.warning(
-                "mmdc CLI not found. To install: npm install -g @mermaid-js/mermaid-cli"
-            )
-            logger.warning("Skipping graph visualization generation...")
-        except Exception as e_cli:
-            logger.warning(f"Failed to generate graph visualization with mmdc: {e_cli}")
-            logger.warning("Skipping graph visualization generation...")
+        mermaid_src = app.get_graph().draw_mermaid()
+        render_with_mmdc(graph_image_path, mermaid_src)
+        logger.info("Graph visualization saved (mmdc CLI)")
+    except FileNotFoundError:
+        logger.warning(
+            "mmdc CLI not found. To install: npm install -g @mermaid-js/mermaid-cli"
+        )
+        logger.warning("Skipping graph visualization generation...")
+    except Exception as e_cli:
+        logger.warning(f"Failed to generate graph visualization with mmdc: {e_cli}")
+        logger.warning("Skipping graph visualization generation...")
 
 
 def get_agent_response(payload: AgentPayload):
     now = datetime.now()
-    ontology = ONTOLOGY
     main_system_prompt = main_system_prompt_template.format(
         date=now,
-        ontology_prompt=get_ontology_prompt(ontology),
+        ontology_prompt=get_ontology_prompt(ONTOLOGY),
     )
     messages = [SystemMessage(content=main_system_prompt)]
     if payload.get("history"):
@@ -103,16 +102,11 @@ def get_agent_response(payload: AgentPayload):
     messages.append(HumanMessage(content=payload["question"]))
     dialects = ["duckdb"]
     state: AgentState = {
-        # "pg_connection": get_postgres_conn(),
         "llm": llm_client,
-        "auto_choose": payload.get("auto_choose_option"),
-        "dialects": dialects,
-        "source": payload.get("source"),
         "initial_question": payload["question"],
+        "dialects": dialects,
         "messages": messages,
-        "decision": "decide",
-        "intermediate_output": "",  # Deprecated - use path_state instead
-        "thoughts": "",
+        "decision": "entities_extraction",
         "path_state": {},
     }
 

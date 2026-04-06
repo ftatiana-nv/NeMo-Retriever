@@ -306,6 +306,8 @@ def search_lancedb_semantic_index(
         lancedb_uri=uri,
         lancedb_table=table_name,
         top_k=fetch_k,
+        # reranker=True,  # enable second-stage reranking
+
     )
 
     hits = retriever.query(

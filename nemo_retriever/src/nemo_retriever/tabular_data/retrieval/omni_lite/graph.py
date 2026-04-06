@@ -27,37 +27,19 @@ logger = logging.getLogger(__name__)
 
 class AgentPayload(TypedDict):
     """Payload received from the API."""
-
-    not_to_check_in_files: bool
-    unstructured: str  # path to file
     question: str
     history: list[dict[str, str]]
-    auto_choose_option: bool
-    source: Literal["slack", "teams", "extension"]
-    is_technical: bool
-    required_property: Optional[str]
-    action: Optional[Literal["smalltalk", "calculation", "information"]]
-    feedback: Optional[Literal["inaccurate", "unclear", "irrelevant"]]
-    candidate_id: Optional[str]
-    candidate_name: Optional[str]
-    candidate_label: Optional[str]
-    candidate_zone_id: Optional[str]
 
 
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
-    pg_connection: object  # TODO lancedb
     initial_question: str
     messages: list[HumanMessage]
     decision: str  # Generalized to support all graph node names
-    intermediate_output: (
-        str  # DEPRECATED: Use path_state instead. Kept for backward compatibility.
-    )
-    thoughts: str  # to log agent reasoning
+    dialects: list[str]
     path_state: dict  # scoped to logic-specific states like retries
-    language: str
 
 
 def get_question_for_processing(state: AgentState) -> str:
@@ -244,7 +226,6 @@ def wrap_node_with_logging(node_name: str, fn):
  
 def create_graph():
 
-
  # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
@@ -266,13 +247,12 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
-    retrieve_candidates_node = _make_node(
-        "retrieve_candidates", agent_wrapper(retrieval_agent)
-    )
     entities_extraction_node = _make_node(
         "entities_extraction", agent_wrapper(entities_extraction_agent)
     )
-
+    retrieve_candidates_node = _make_node(
+        "retrieve_candidates", agent_wrapper(retrieval_agent)
+    )
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
     )

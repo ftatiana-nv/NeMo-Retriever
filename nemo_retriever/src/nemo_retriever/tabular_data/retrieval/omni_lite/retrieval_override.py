@@ -34,6 +34,7 @@ class OmniLiteRetriever(Retriever):
         query_vectors: list[list[float]],
         query_texts: list[str],
         label_in: Optional[Sequence[str]] = None,
+        
     ) -> list[list[dict[str, Any]]]:
         import lancedb  # type: ignore
         import numpy as np
@@ -175,6 +176,9 @@ class OmniLiteRetriever(Retriever):
             label_in=label_in,
         )
 
+        # If True: after LanceDB hits, re-score each (query, chunk) with a cross-encoder
+        # (``reranker_model_name``), reorder by ``_rerank_score``, return top ``top_k``.
+        # Cross-encoder = one model pass over query+passage together (finer than embedding cosine).
         if self.reranker:
             results = self._rerank_results(query_texts, results)
 
