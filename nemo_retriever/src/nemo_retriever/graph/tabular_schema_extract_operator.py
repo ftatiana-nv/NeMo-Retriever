@@ -15,7 +15,7 @@ from nemo_retriever.graph.cpu_operator import CPUOperator
 from nemo_retriever.params import TabularExtractParams
 
 
-class TabularExtractOp(AbstractOperator, CPUOperator):
+class TabularSchemaExtractOp(AbstractOperator, CPUOperator):
     """Extract schema entities from a relational DB and write them to Neo4j.
 
     Combines two steps:
@@ -25,7 +25,7 @@ class TabularExtractOp(AbstractOperator, CPUOperator):
     2. Write the extracted entities as graph nodes and relationships into Neo4j.
 
     The operator produces an empty DataFrame as output so it can be chained
-    with downstream operators (e.g. :class:`FetchTabularEmbeddingDfOp`) via
+    with downstream operators (e.g. :class:`TabularFetchEmbeddingsOp`) via
     ``>>``.  All meaningful state lives in Neo4j after this step.
     """
 

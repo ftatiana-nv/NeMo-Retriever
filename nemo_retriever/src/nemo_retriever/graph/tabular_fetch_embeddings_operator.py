@@ -14,7 +14,7 @@ from nemo_retriever.graph.abstract_operator import AbstractOperator
 from nemo_retriever.graph.cpu_operator import CPUOperator
 
 
-class FetchTabularEmbeddingDfOp(AbstractOperator, CPUOperator):
+class TabularFetchEmbeddingsOp(AbstractOperator, CPUOperator):
     """Fetch all tabular entity descriptions from Neo4j into an embedding-ready DataFrame.
 
     This operator ignores its input — it always queries Neo4j directly and
