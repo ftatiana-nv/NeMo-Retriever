@@ -86,7 +86,9 @@ Extract:
             path_state["entities_and_concepts"] = entities_and_concepts
 
             self.logger.info(
-                f"Extracted {len(entities_and_concepts)} entities/concepts from normalized question"
+                "Extracted %s entities/concepts from normalized question: %s",
+                len(entities_and_concepts),
+                entities_and_concepts,
             )
             return {"path_state": path_state}
 

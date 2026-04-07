@@ -320,12 +320,12 @@ def search_lancedb_semantic_index(
     uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
     table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
     allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
-    fetch_k = max(int(k) * 10, int(k) + 40, 50)
+    
 
     retriever = OmniLiteRetriever(
         lancedb_uri=uri,
         lancedb_table=table_name,
-        top_k=fetch_k,
+        top_k=k,
         # reranker=True,  # enable second-stage reranking
 
     )

@@ -85,6 +85,7 @@ def get_agent_response(payload: AgentPayload):
     main_system_prompt = main_system_prompt_template.format(
         date=now,
         ontology_prompt=get_ontology_prompt(ONTOLOGY),
+        dialects=payload.get("dialects"),
     )
     messages = [SystemMessage(content=main_system_prompt)]
     if payload.get("history"):
