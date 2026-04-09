@@ -16,15 +16,66 @@ from nemo_retriever.retriever import Retriever
 class OmniLiteRetriever(Retriever):
     """Same as :class:`~nemo_retriever.retriever.Retriever`, plus optional ``label_in``.
 
-    When the LanceDB table has a top-level ``label`` column, ``query`` / ``queries``
-    can pass ``label_in`` to apply ``WHERE label IN (...)``. Labels stored only in
-    JSON ``metadata`` are not filtered server-side; filter in application code.
+    If the table has a top-level ``label`` column, ``label_in`` becomes
+    ``WHERE label IN (...)``.
+
+    If there is no ``label`` column but a ``metadata`` string column exists (typical
+    nv-ingest rows), ``label_in`` is applied as an ``OR`` of ``metadata LIKE`` patterns
+    that match both JSON (``"label": "…"``) and Python-repr (``'label': '…'``) encodings,
+    including Neo4j ``Table`` vs semantic ``table``.
     """
 
     @staticmethod
     def _sql_in_literals(values: Sequence[str]) -> str:
         """Escape single-quoted strings for LanceDB ``IN (...)`` predicates."""
         return ", ".join("'" + str(v).replace("'", "''") + "'" for v in values)
+
+    @staticmethod
+    def _sql_string_literal(value: str) -> str:
+        return "'" + str(value).replace("'", "''") + "'"
+
+    @classmethod
+    def _build_label_where(
+        cls,
+        field_names: list[str],
+        label_in: Optional[Sequence[str]],
+    ) -> Optional[str]:
+        """Return a DataFusion/Lance ``WHERE`` fragment, or ``None`` if no filter."""
+        if not label_in:
+            return None
+        labels = [str(x).strip() for x in label_in if x is not None and str(x).strip()]
+        if not labels:
+            return None
+
+        # Prefer a real column — exact match, vector search respects predicate.
+        if "label" in field_names:
+            return f"label IN ({cls._sql_in_literals(labels)})"
+
+        # Labels only embedded in metadata (string column): substring match on common encodings.
+        if "metadata" not in field_names:
+            return None
+
+        def value_variants(canonical: str) -> list[str]:
+            c = canonical.lower()
+            if c == "table":
+                return ["table", "Table", "TABLE"]
+            return [canonical]
+
+        like_parts: list[str] = []
+        for lab in labels:
+            for v in value_variants(lab):
+                # JSON double-quoted
+                for inner in (f'"label": "{v}"', f'"label":"{v}"'):
+                    pat = "%" + inner + "%"
+                    like_parts.append(f"metadata LIKE {cls._sql_string_literal(pat)}")
+                # Python repr / single-quoted (Neo4j-style): 'label': 'Table'
+                inner_repr = f"'label': '{v}'"
+                pat_repr = "%" + inner_repr.replace("'", "''") + "%"
+                like_parts.append(f"metadata LIKE {cls._sql_string_literal(pat_repr)}")
+
+        if not like_parts:
+            return None
+        return "(" + " OR ".join(like_parts) + ")"
 
     def _search_lancedb(
         self,
@@ -43,11 +94,7 @@ class OmniLiteRetriever(Retriever):
         table = db.open_table(lancedb_table)
 
         field_names = [f.name for f in table.schema]
-        label_where: Optional[str] = None
-        if label_in:
-            labels = [str(x) for x in label_in if x is not None and str(x).strip()]
-            if labels and "label" in field_names:
-                label_where = f"label IN ({self._sql_in_literals(labels)})"
+        label_where = self._build_label_where(field_names, label_in)
 
         effective_nprobes = int(self.nprobes)
         if effective_nprobes <= 0:

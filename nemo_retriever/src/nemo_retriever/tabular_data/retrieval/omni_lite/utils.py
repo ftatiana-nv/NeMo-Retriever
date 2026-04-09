@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 from enum import StrEnum
@@ -266,8 +267,31 @@ def _parse_lancedb_row_metadata(hit: dict) -> dict:
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
+            # Ingestion sometimes stores Python repr (single-quoted keys) — not valid JSON.
+            try:
+                ev = ast.literal_eval(raw)
+                if isinstance(ev, dict):
+                    return ev
+            except (ValueError, SyntaxError, TypeError):
+                pass
             return {}
     return {}
+
+
+def _label_matches_semantic_filter(lab: object, allowed_labels: set[str]) -> bool:
+    """
+    True if ``lab`` is allowed or there is no filter.
+
+    Matching is case-insensitive so Neo4j ``Table`` matches ``Labels.TABLE`` (``table``).
+    When a filter is set, rows with unknown / missing label are excluded.
+    """
+    if not allowed_labels:
+        return True
+    if lab is None or (isinstance(lab, str) and not lab.strip()):
+        return False
+    ls = str(lab).strip().lower()
+    allowed_lower = {str(x).strip().lower() for x in allowed_labels if x is not None}
+    return ls in allowed_lower
 
 
 def _l2_distance_to_score(distance: object | None) -> float:
@@ -288,7 +312,7 @@ def _hits_to_semantic_rows(hits: list[dict], allowed_labels: set[str], k: int) -
         meta = _parse_lancedb_row_metadata(hit)
         top_label = hit.get("label")
         lab = top_label if top_label is not None else meta.get("label")
-        if allowed_labels and str(lab) not in allowed_labels:
+        if not _label_matches_semantic_filter(lab, allowed_labels):
             continue
         score = _l2_distance_to_score(hit.get("_distance"))
         row = {**meta, "score": score}
@@ -302,6 +326,35 @@ def _hits_to_semantic_rows(hits: list[dict], allowed_labels: set[str], k: int) -
     return rows[: int(k)]
 
 
+def _omni_semantic_retriever_init_kwargs(
+    uri: str,
+    table_name: str,
+    top_k: int,
+) -> dict:
+    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``OmniLiteRetriever``.
+
+    When ``OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
+    query embeddings go to that HTTP NIM / OpenAI-compatible API (same pattern as
+    ``EmbedParams.embed_invoke_url`` in tabular ingest) instead of loading the HF model locally.
+    """
+    kwargs: dict = {
+        "lancedb_uri": uri,
+        "lancedb_table": table_name,
+        "top_k": top_k,
+    }
+    http_ep = (
+        (os.environ.get("OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT") or "").strip()
+        or (os.environ.get("EMBEDDING_HTTP_ENDPOINT") or "").strip()
+    )
+    if http_ep:
+        kwargs["embedding_http_endpoint"] = http_ep
+        kwargs["embedding_api_key"] = (os.environ.get("NVIDIA_API_KEY") or "").strip()
+    model = (os.environ.get("OMNI_SEMANTIC_EMBEDDER_MODEL") or "").strip()
+    if model:
+        kwargs["embedder"] = model
+    return kwargs
+
+
 def search_lancedb_semantic_index(
     entity: str,
     k: int = 30,
@@ -309,23 +362,30 @@ def search_lancedb_semantic_index(
 ) -> list[dict]:
     """
     Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override.OmniLiteRetriever`
-    (same stack as ``generate_sql.get_sql_tool_response_top_k``), then keep rows
-    whose ``label`` matches ``label_filter`` (top-level column or parsed ``metadata``).
+    (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
-    Env: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
+    ``OmniLiteRetriever`` applies ``label_filter`` **in LanceDB** when possible: a real
+    ``label`` column uses ``WHERE label IN (...)``; otherwise ``WHERE`` on ``metadata``
+    string patterns (JSON / Python-repr). Rows are then tightened again in
+    ``_hits_to_semantic_rows`` (parse metadata, case-insensitive label match).
+
+    Env — LanceDB: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
     ``OMNI_SEMANTIC_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
+
+    Env — **remote embeddings** (optional, avoids local HF load): set
+    ``OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) to e.g.
+    ``https://integrate.api.nvidia.com/v1``, and ``NVIDIA_API_KEY`` for the hosted API.
+    Optional: ``OMNI_SEMANTIC_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
     """
     from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
 
     uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
     table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
     allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
-    
+    limit = max(1, int(k))
 
     retriever = OmniLiteRetriever(
-        lancedb_uri=uri,
-        lancedb_table=table_name,
-        top_k=k,
+        **_omni_semantic_retriever_init_kwargs(uri, table_name, limit),
         # reranker=True,  # enable second-stage reranking
 
     )
@@ -337,7 +397,7 @@ def search_lancedb_semantic_index(
         label_in=sorted(allowed_labels) if allowed_labels else None,
     )
 
-    return _hits_to_semantic_rows(hits, allowed_labels, int(k))
+    return _hits_to_semantic_rows(hits, allowed_labels, limit)
 
 
 
