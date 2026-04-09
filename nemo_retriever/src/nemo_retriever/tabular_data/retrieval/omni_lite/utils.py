@@ -116,7 +116,7 @@ def get_stored_usage_percentiles(percentiles_type_name: str):
                 MATCH (n:db)
                 RETURN n.{f"{percentiles_type_name}_25"} as usage_percentile_25, n.{f"{percentiles_type_name}_75"} as usage_percentile_75
                 """
-    results = conn.query_read_only(
+    results = conn.query_read(
         query=query,
         parameters={
         },
@@ -139,7 +139,7 @@ def init_queries_usage_percentiles():
     count_string = get_count_str_by_month("n")
     query_all = f"""match(n:sql{{is_sub_select:FALSE}})
                      return collect({count_string}) as usages """
-    usages_result = conn.query_read_only(
+    usages_result = conn.query_read(
         query=query_all, parameters={}
     )
     usages = usages_result[0]["usages"]
@@ -246,7 +246,7 @@ def expand_info(ids_and_labels):
             "usage_percentile_75": queries_percentile_75,
         }
         params.update(queries_for_columns_params)
-        result = conn.query_read_only(
+        result = conn.query_read(
             query=query,
             parameters=params,
         )
@@ -364,10 +364,9 @@ def search_lancedb_semantic_index(
     Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override.OmniLiteRetriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
-    ``OmniLiteRetriever`` applies ``label_filter`` **in LanceDB** when possible: a real
-    ``label`` column uses ``WHERE label IN (...)``; otherwise ``WHERE`` on ``metadata``
-    string patterns (JSON / Python-repr). Rows are then tightened again in
-    ``_hits_to_semantic_rows`` (parse metadata, case-insensitive label match).
+    ``OmniLiteRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
+    (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
+    ``Column`` vs ``column``). Rows are tightened again in ``_hits_to_semantic_rows``.
 
     Env — LanceDB: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
     ``OMNI_SEMANTIC_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).

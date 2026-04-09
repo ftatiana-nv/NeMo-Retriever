@@ -92,7 +92,7 @@ def _get_column_breadcrumbs(column_ids: list) -> dict:
         MATCH (c:column )<-[:schema]-(t:table)<-[:schema]-(s:schema)<-[:schema]-(db:db)<-[:connecting]-(conn:connection)
         RETURN col_id as column_id, t.name as table_name, s.name as schema_name, db.name as database_name, conn.id as connection, conn.type as connection_type
     """
-    rows = neo4j_conn.query_read_only(
+    rows = neo4j_conn.query_read(
         query=query,
         parameters={"column_ids": column_ids},
     )

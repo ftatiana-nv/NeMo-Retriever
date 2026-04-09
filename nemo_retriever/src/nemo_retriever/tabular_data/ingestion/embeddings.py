@@ -34,6 +34,27 @@ def query_neo4j_tables_for_embedding() -> List[dict]:
     return result[0].get("docs") or []
 
 
+def query_neo4j_columns_for_embedding() -> List[dict]:
+    """Return one doc per ``Column`` node for embedding (distinct from table-level rows)."""
+    neo4j_conn = get_neo4j_conn()
+    query = """MATCH (d:Db)-[:CONTAINS]->(s:Schema)-[:CONTAINS]->(t:Table)-[:CONTAINS]->(c:Column)
+               RETURN collect({
+                 text: "db_name: " + d.name + ", schema_name: " + s.name +
+                   ", table_name: " + t.name + ", column_name: " + c.name +
+                   ", data_type: " + coalesce(toString(c.data_type), "") +
+                   CASE WHEN c.description IS NOT NULL AND trim(toString(c.description)) <> ""
+                     THEN ", column_description: " + toString(c.description) ELSE "" END,
+                 name: c.name,
+                 label: labels(c)[0],
+                 id: c.id
+               }) as docs
+            """
+    result = neo4j_conn.query_read(query, parameters={})
+    if not result:
+        return []
+    return result[0].get("docs") or []
+
+
 def fetch_tabular_embedding_dataframe() -> pd.DataFrame:
     """Fetch all tabular entity docs from Neo4j and return a DataFrame ready for embedding.
 
@@ -42,7 +63,9 @@ def fetch_tabular_embedding_dataframe() -> pd.DataFrame:
     unstructured pipeline so run_pipeline_tasks_on_df works without changes.
     """
     _empty = pd.DataFrame(columns=["text", "_embed_modality", "path", "page_number", "metadata"])
-    docs = query_neo4j_tables_for_embedding()
+    table_docs = query_neo4j_tables_for_embedding()
+    column_docs = query_neo4j_columns_for_embedding()
+    docs = list(table_docs) + list(column_docs)
     if not docs:
         return _empty
 
