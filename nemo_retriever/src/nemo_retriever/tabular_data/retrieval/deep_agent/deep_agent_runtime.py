@@ -27,7 +27,7 @@ from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from sqlalchemy import create_engine, inspect, text
 
-from nemo_retriever.relational_db.benchmark.sql_tool.generate_sql import _make_llm
+from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger("deepagents").setLevel(logging.INFO)
@@ -107,9 +107,7 @@ def _duckdb_sqlalchemy_schema_parts(schema_str: str | None) -> tuple[str | None,
     return first, rest
 
 
-def _duckdb_describe_fqtn(
-    database_name: str | None, schema_name: str, table_name: str
-) -> str:
+def _duckdb_describe_fqtn(database_name: str | None, schema_name: str, table_name: str) -> str:
     """Build a catalog.schema.table reference for ``DESCRIBE`` (quoted identifiers)."""
     if database_name:
         return (
@@ -126,9 +124,7 @@ def _make_schema_table_key(schema: str, table: str) -> str:
 
 def _split_schema_table_key(key: str) -> tuple[str, str]:
     if _SCHEMA_TABLE_JOINER not in key:
-        raise ValueError(
-            f"Invalid multi-schema table key {key!r} (expected 'schema{_SCHEMA_TABLE_JOINER}table')"
-        )
+        raise ValueError(f"Invalid multi-schema table key {key!r} (expected 'schema{_SCHEMA_TABLE_JOINER}table')")
     return key.split(_SCHEMA_TABLE_JOINER, 1)
 
 
@@ -247,9 +243,7 @@ class DuckDBLangChainSQLDatabase(SQLDatabase):
                     try:
                         target = _duckdb_describe_fqtn(db_part, sch_part, tname)
                         desc_rows = conn.execute(text(f"DESCRIBE {target}")).fetchall()
-                        rows = [
-                            (r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]
-                        ]
+                        rows = [(r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]]
                     except Exception:  # noqa: PERF203
                         rows = []
 
@@ -409,14 +403,12 @@ class DuckDBAllSchemasSQLDatabase(DuckDBLangChainSQLDatabase):
                     try:
                         target = _duckdb_describe_fqtn(db_part, sch, tn)
                         desc_rows = conn.execute(text(f"DESCRIBE {target}")).fetchall()
-                        rows = [
-                            (r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]
-                        ]
+                        rows = [(r[0], r[1]) for r in desc_rows if len(r) >= 2 and r[0] and r[1]]
                     except Exception:  # noqa: PERF203
                         rows = []
 
                 if not rows:
-                    blocks.append(f'/* no columns found for {tname!r} */')
+                    blocks.append(f"/* no columns found for {tname!r} */")
                     continue
 
                 col_lines = ",\n  ".join(f'"{r[0]}" {r[1]}' for r in rows)
@@ -474,10 +466,7 @@ def _deep_agent_sql_catalog_prompt(db: SQLDatabase) -> str | None:
         print(f"Warning: could not build SQL catalog prompt: {e}")
         return None
     if mode == "full":
-        return (
-            "## DuckDB catalog (ground truth — never invent tables or columns)\n\n"
-            f"{ctx.get('table_info', '')}\n"
-        )
+        return "## DuckDB catalog (ground truth — never invent tables or columns)\n\n" f"{ctx.get('table_info', '')}\n"
     return (
         "## DuckDB catalog (ground truth — never invent table or column names)\n\n"
         "- Call `sql_db_list_tables` then `sql_db_schema` before writing SQL.\n"
@@ -517,7 +506,7 @@ def _resolve_duckdb_schema(requested: str | None, user_schemas: list[str]) -> st
         raise ValueError(
             "Multiple DuckDB schemas exist; pick one for SQL tools. "
             "Set env DEEP_AGENT_DUCKDB_SCHEMA, or pass payload['duckdb_schema'] / payload['db'] "
-            "(e.g. spider2-lite jsonl \"db\" field). "
+            '(e.g. spider2-lite jsonl "db" field). '
             f"Available: {user_schemas[:20]}{'...' if len(user_schemas) > 20 else ''}"
         )
 
@@ -563,14 +552,10 @@ def _resolve_duckdb_schema(requested: str | None, user_schemas: list[str]) -> st
         return exact_hits[0]
     if len(exact_hits) > 1:
         raise ValueError(
-            f"Ambiguous schema hint {hint!r}; matches {exact_hits[:10]}. "
-            "Pass an exact schema name from the list."
+            f"Ambiguous schema hint {hint!r}; matches {exact_hits[:10]}. " "Pass an exact schema name from the list."
         )
 
-    raise ValueError(
-        f"Could not resolve DuckDB schema from {hint!r}. "
-        f"Try an exact name from: {user_schemas[:30]}"
-    )
+    raise ValueError(f"Could not resolve DuckDB schema from {hint!r}. " f"Try an exact name from: {user_schemas[:30]}")
 
 
 def _get_sql_agent(
@@ -598,14 +583,11 @@ def _get_sql_agent(
     https://github.com/langchain-ai/deepagents ).
     Caching is per resolved schema (or the all-schemas sentinel), ``all_schemas``, and catalog mode.
     """
-    global _sql_agents
-
     try:
         import duckdb_engine  # noqa: F401  # registers SQLAlchemy dialect
     except ImportError as e:
         raise ImportError(
-            "duckdb-engine is required for Deep Agent + DuckDB. "
-            "Install: pip install 'duckdb-engine>=0.13.0'"
+            "duckdb-engine is required for Deep Agent + DuckDB. " "Install: pip install 'duckdb-engine>=0.13.0'"
         ) from e
 
     db_path = _duckdb_file_path()
@@ -631,15 +613,10 @@ def _get_sql_agent(
         except Exception as e:
             print(f"Warning: Could not access schema {schema}: {e}")
 
-    print(
-        f"DuckDB {db_path}: {all_table_count} tables across {len(user_schemas)} schema(s)"
-    )
+    print(f"DuckDB {db_path}: {all_table_count} tables across {len(user_schemas)} schema(s)")
 
     use_all_user_schemas = (
-        bool(all_schemas)
-        and bool(available_schemas)
-        and _deep_agent_all_schemas_enabled()
-        and len(user_schemas) >= 1
+        bool(all_schemas) and bool(available_schemas) and _deep_agent_all_schemas_enabled() and len(user_schemas) >= 1
     )
 
     if use_all_user_schemas:
@@ -675,21 +652,20 @@ def _get_sql_agent(
     toolkit = DuckDBSQLDatabaseToolkit(db=db_for_schema, llm=llm)
     all_sql_tools = toolkit.get_tools()
 
-    print(
-        f"Deep Agent SQL tools for {resolved!r}: "
-        f"{[getattr(t, 'name', '?') for t in all_sql_tools]}"
-    )
+    print(f"Deep Agent SQL tools for {resolved!r}: " f"{[getattr(t, 'name', '?') for t in all_sql_tools]}")
 
     sql_catalog_prompt = _deep_agent_sql_catalog_prompt(db_for_schema)
     if sql_catalog_prompt:
         print(
             f"Deep Agent: SQL catalog system prompt = {_cat_mode!r} "
-            f"({len(sql_catalog_prompt)} chars; set DEEP_AGENT_SQL_CATALOG_MODE='off' in deep_agent_runtime to disable)."
+            f"({len(sql_catalog_prompt)} chars; set DEEP_AGENT_SQL_CATALOG_MODE='off'"
+            " in deep_agent_runtime to disable)."
         )
 
     print(
         f"Deep Agent: skills loaded = {bool(skill_dirs)} "
-        "(set DEEP_AGENT_LOAD_SKILLS=0 to disable; use a long-context LLM_MODEL + DEEP_AGENT_MAX_TOKENS if prompts are large)."
+        "(set DEEP_AGENT_LOAD_SKILLS=0 to disable; use a long-context"
+        " LLM_MODEL + DEEP_AGENT_MAX_TOKENS if prompts are large)."
     )
 
     agent = create_deep_agent(
@@ -707,7 +683,10 @@ def _get_sql_agent(
 
 
 def _safe_sql_id_filename(sql_id: str) -> str:
-    """Sanitize benchmark ``instance_id`` / ``sql_id`` for filenames (same rules as ``debug_retriever_sql._safe_filename``)."""
+    """Sanitize benchmark ``instance_id`` / ``sql_id`` for filenames.
+
+    Same rules as ``debug_retriever_sql._safe_filename``.
+    """
     return re.sub(r"[^\w\-.]", "_", (sql_id or "").strip()) or "unknown"
 
 
@@ -780,9 +759,7 @@ def _extract_json_answer_object(content: str) -> dict | None:
         if text[i] == "{":
             try:
                 obj, _end = decoder.raw_decode(text, i)
-                if isinstance(obj, dict) and _REQUIRED_ANSWER_KEYS.issubset(
-                    obj.keys()
-                ):
+                if isinstance(obj, dict) and _REQUIRED_ANSWER_KEYS.issubset(obj.keys()):
                     return obj
             except json.JSONDecodeError:
                 pass
@@ -816,9 +793,7 @@ def _extract_sql_from_tool_shaped_json(content: str) -> dict | None:
             continue
         name = obj.get("name")
         params = obj.get("parameters")
-        if name not in ("sql_db_query", "sql_db_query_checker") or not isinstance(
-            params, dict
-        ):
+        if name not in ("sql_db_query", "sql_db_query_checker") or not isinstance(params, dict):
             i += 1
             continue
         q = params.get("query")

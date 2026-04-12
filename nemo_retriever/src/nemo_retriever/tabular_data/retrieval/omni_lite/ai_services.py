@@ -1,5 +1,5 @@
 from langchain_core.messages import BaseMessage, SystemMessage
-from typing import Type, TypeVar, cast
+from typing import Type, TypeVar
 from pydantic import BaseModel, ValidationError
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import logging
@@ -7,18 +7,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
-
 RETRY_MAX_ATTEMPTS = 3
 T = TypeVar("T", bound=BaseModel)
-
 
 
 def safe_invoke_with_structured_output(
     llm: ChatNVIDIA,
     messages: list[BaseMessage],
     schema: Type[T],
-    method: str = "function_calling",
 ) -> T:
     """LLM structured call with retry"""
     current_messages = messages.copy()
@@ -26,22 +22,7 @@ def safe_invoke_with_structured_output(
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            # if use_custom_parser:
-            #     llm_with_tools = llm.bind_tools([schema], tool_choice="any")
-            #     raw_response = llm_with_tools.invoke(current_messages)
-            #     parser = FallbackJsonParser(
-            #         tools=[cast(TypeBaseModel, schema)], first_tool_only=True
-            #     )
-            #     result = parser.parse_result([ChatGeneration(message=raw_response)])
-            #     if result is None:
-            #         raise ValueError(
-            #             "Parser returned None - could not extract structured output"
-            #         )
-
-            #     return result
-
-            # standard LangChain structured output
-            model_llm = llm.with_structured_output(schema, method=method)
+            model_llm = llm.with_structured_output(schema)
             result = model_llm.invoke(current_messages)
             return result
         except ValidationError as e:
@@ -58,9 +39,7 @@ def safe_invoke_with_structured_output(
                     )
                 )
             else:
-                logger.error(
-                    f"❌ Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}"
-                )
+                logger.error(f"❌ Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}")
                 raise  # If still failing after max tries, raise
 
         except Exception as e:
@@ -76,12 +55,11 @@ def invoke_with_structured_output(
     llm: ChatNVIDIA,
     messages: list[BaseMessage],
     schema: Type[T],
-    method: str = "function_calling",
 ) -> T | None:
     """Safe wrapper for invoke_with_structured_output that returns None on failure"""
     try:
         schema_name = getattr(schema, "__name__", str(schema))
-        return safe_invoke_with_structured_output(llm, messages, schema, method)
+        return safe_invoke_with_structured_output(llm, messages, schema)
     except Exception as e:
         logger.error(
             f"❌ invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "

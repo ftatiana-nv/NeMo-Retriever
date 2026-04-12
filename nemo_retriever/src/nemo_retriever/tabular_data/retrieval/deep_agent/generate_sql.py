@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 
-from nemo_retriever.relational_db.benchmark.deep_agent.prompts import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.prompts import (
     format_deep_agent_user_prompt,
 )
 
@@ -29,8 +29,9 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
     payload:
         Must include ``question``. Optional:
 
-        - ``all_schemas`` (default: ``False`` when ``db``/``duckdb_schema`` is present, else ``True``): list/query **all** user schemas in the DuckDB
-          file; ``db`` / ``duckdb_schema`` are not used to bind ``search_path``. Set
+        - ``all_schemas`` (default: ``False`` when ``db``/``duckdb_schema`` is present,
+          else ``True``): list/query **all** user schemas in the DuckDB file;
+          ``db`` / ``duckdb_schema`` are not used to bind ``search_path``. Set
           ``all_schemas`` to ``False`` to pin one schema (use with ``db`` / ``duckdb_schema``
           or ``DEEP_AGENT_DUCKDB_SCHEMA``; see ``DEEP_AGENT_ALL_SCHEMAS`` env).
         - ``db`` / ``duckdb_schema``: Spider2 database id → DuckDB schema when **single-schema**
@@ -46,7 +47,7 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
     dict
         ``{"sql_code": str, "answer": str, "result": ...}``
     """
-    from nemo_retriever.relational_db.benchmark.deep_agent import deep_agent_runtime as rt
+    from nemo_retriever.tabular_data.retrieval.deep_agent import deep_agent_runtime as rt
 
     question = payload.get("question")
     _user_id = payload.get("user_id")
@@ -87,9 +88,7 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
 
     for attempt in range(1, max_retries + 1):
         try:
-            result = agent.invoke(
-                {"messages": [{"role": "user", "content": prompt}]}
-            )
+            result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
             parsed = rt._extract_structured_answer(result)
             if parsed is not None:
                 result_dict = {
@@ -97,18 +96,12 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                     "answer": parsed.get("answer", ""),
                     "result": parsed.get("result"),
                 }
-                rt._save_answer_json(
-                    base_dir, question, attempt, result_dict, sql_id=sql_id
-                )
+                rt._save_answer_json(base_dir, question, attempt, result_dict, sql_id=sql_id)
                 return result_dict
 
             messages = result.get("messages") or []
             final_message = messages[-1] if messages else None
-            raw_content = (
-                getattr(final_message, "content", None)
-                if final_message is not None
-                else None
-            )
+            raw_content = getattr(final_message, "content", None) if final_message is not None else None
 
             if raw_content is not None:
                 result_dict = {
@@ -116,14 +109,10 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
                     "answer": raw_content,
                     "result": None,
                 }
-                rt._save_answer_json(
-                    base_dir, question, attempt, result_dict, sql_id=sql_id
-                )
+                rt._save_answer_json(base_dir, question, attempt, result_dict, sql_id=sql_id)
                 return result_dict
         except Exception as e:  # noqa: PERF203
-            print(
-                f"Error in get_deep_agent_sql_response (attempt {attempt}/{max_retries}): {e}"
-            )
+            print(f"Error in get_deep_agent_sql_response (attempt {attempt}/{max_retries}): {e}")
             last_error = e
 
     return {
@@ -131,4 +120,3 @@ def get_deep_agent_sql_response(account_id: str, payload: dict) -> dict:
         "answer": f"Deep agent failed after {max_retries} attempts: {last_error}",
         "result": None,
     }
-

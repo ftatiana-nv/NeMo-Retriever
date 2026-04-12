@@ -82,6 +82,8 @@ dependencies = [
   "duckdb-engine>=0.13.0",
   "neo4j>=5.0",
   "langchain-nvidia-ai-endpoints>=0.3.0",
+  "deepagents>=0.1.0",
+  "langchain-community>=0.3.0",
 ]
 
 [project.optional-dependencies]
