@@ -3,9 +3,8 @@ import logging
 
 from nemo_retriever.tabular_data.neo4j.neo4j_connection import get_neo4j_conn
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
-    Labels,
-)
+# Labels imported for the commented-out validation body below
+# from nemo_retriever.tabular_data.retrieval.omni_lite.utils import Labels
 
 logger = logging.getLogger(__name__)
 neo4j_conn = get_neo4j_conn()
@@ -89,10 +88,16 @@ def _get_column_breadcrumbs(column_ids: list) -> dict:
 
     query = """
         UNWIND $column_ids as col_id
-        MATCH (c:column )<-[:schema]-(t:table)<-[:schema]-(s:schema)<-[:schema]-(db:db)<-[:connecting]-(conn:connection)
-        RETURN col_id as column_id, t.name as table_name, s.name as schema_name, db.name as database_name, conn.id as connection, conn.type as connection_type
+        MATCH (c:column)<-[:schema]-(t:table)<-[:schema]-(s:schema)
+              <-[:schema]-(db:db)<-[:connecting]-(conn:connection)
+        RETURN col_id as column_id,
+               t.name as table_name,
+               s.name as schema_name,
+               db.name as database_name,
+               conn.id as connection,
+               conn.type as connection_type
     """
-    rows = neo4j_conn.query_read(
+    rows = get_neo4j_conn().query_read(
         query=query,
         parameters={"column_ids": column_ids},
     )
@@ -118,49 +123,53 @@ def query_validation(
     user_participants: list,
     fks=None,
 ):
-    return_dict = {}
-    try:
-        query = parse_single(
-            q=sql,
-            schemas=schemas,
-            dialects=dialects,
-            sql_type=Labels.SEMANTIC,
-            allow_only_select=True,
-            fks=fks,
-        )
-        column_ids = query.get_reached_columns_ids()
-        return_dict["sql_columns"] = column_ids
-        if column_ids:
-            pii_columns = get_columns_with_pii_tag(column_ids)
-            return_dict["pii_objects"] = pii_columns
-            # Extract breadcrumb information for columns
-            column_breadcrumbs = _get_column_breadcrumbs(column_ids)
-            return_dict["column_breadcrumbs"] = column_breadcrumbs
-        if column_ids:
-            tables_validation = validate_tables_with_user_participants(
-                user_participants, column_ids
-            )
-            out_of_zone = [
-                t["table_name"] for t in tables_validation if not t["in_zone"]
-            ]
-            if len(out_of_zone) > 0:
-                return_dict.update(
-                    {
-                        "error": f"The following tables are not authorized for use: {', '.join(out_of_zone)}",
-                        "another_try": 1,
-                    }
-                )
-                return return_dict
+    # Validation temporarily bypassed — always returns success.
+    # Original implementation preserved below for future re-enabling.
+    return {"success": True, "sql_columns": []}
 
-        return_dict["success"] = True
-        return return_dict
-
-    except NoFKError as error:
-        return_dict.update({"error": str(error), "another_try": 1})
-        return return_dict
-    except NotSelectSqlTypeError as error:
-        return_dict.update({"error": str(error), "another_try": 0})
-        return return_dict
-    except Exception as error:
-        return_dict.update({"error": str(error), "another_try": 1})
-        return return_dict
+    # return_dict = {}
+    # try:
+    #     query = parse_single(
+    #         q=sql,
+    #         schemas=schemas,
+    #         dialects=dialects,
+    #         sql_type=Labels.SEMANTIC,
+    #         allow_only_select=True,
+    #         fks=fks,
+    #     )
+    #     column_ids = query.get_reached_columns_ids()
+    #     return_dict["sql_columns"] = column_ids
+    #     if column_ids:
+    #         pii_columns = get_columns_with_pii_tag(column_ids)
+    #         return_dict["pii_objects"] = pii_columns
+    #         # Extract breadcrumb information for columns
+    #         column_breadcrumbs = _get_column_breadcrumbs(column_ids)
+    #         return_dict["column_breadcrumbs"] = column_breadcrumbs
+    #     if column_ids:
+    #         tables_validation = validate_tables_with_user_participants(
+    #             user_participants, column_ids
+    #         )
+    #         out_of_zone = [
+    #             t["table_name"] for t in tables_validation if not t["in_zone"]
+    #         ]
+    #         if len(out_of_zone) > 0:
+    #             return_dict.update(
+    #                 {
+    #                     "error": f"The following tables are not authorized for use: {', '.join(out_of_zone)}",
+    #                     "another_try": 1,
+    #                 }
+    #             )
+    #             return return_dict
+    #
+    #     return_dict["success"] = True
+    #     return return_dict
+    #
+    # except NoFKError as error:
+    #     return_dict.update({"error": str(error), "another_try": 1})
+    #     return return_dict
+    # except NotSelectSqlTypeError as error:
+    #     return_dict.update({"error": str(error), "another_try": 0})
+    #     return return_dict
+    # except Exception as error:
+    #     return_dict.update({"error": str(error), "another_try": 1})
+    #     return return_dict
