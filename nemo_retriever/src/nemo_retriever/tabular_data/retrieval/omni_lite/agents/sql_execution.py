@@ -85,5 +85,5 @@ class SQLExecutionAgent(BaseAgent):
 
         return {
             "decision": "valid_sql",
-            "path_state": {**path_state, "sql_response_from_db": response_from_db},
+            "path_state": {**path_state, "sql_response_from_db": response_from_db.result},
         }
