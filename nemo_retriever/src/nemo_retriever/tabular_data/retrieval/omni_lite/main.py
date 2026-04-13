@@ -1,6 +1,7 @@
 import logging
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
+    _SQLCaptureCallback,
     create_omni_lite_agent,
     extract_structured_answer,
     format_omni_lite_user_prompt,
@@ -32,7 +33,8 @@ def get_agent_response(payload: AgentPayload):
         dict with keys ``sql_code``, ``answer``, ``result``,
         ``semantic_elements`` (and possibly others from the agent).
     """
-    agent = create_omni_lite_agent(payload, llm=llm_client)
+    agent, sql_store = create_omni_lite_agent(payload, llm=llm_client)
+    sql_capture = _SQLCaptureCallback(sql_store)
 
     prompt = format_omni_lite_user_prompt(
         question=payload["question"],
@@ -45,7 +47,10 @@ def get_agent_response(payload: AgentPayload):
 
     for attempt in range(1, max_retries + 1):
         try:
-            result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+            result = agent.invoke(
+                {"messages": [{"role": "user", "content": prompt}]},
+                config={"callbacks": [sql_capture]},
+            )
             parsed = extract_structured_answer(result)
             if parsed is not None:
                 logger.info("OmniLite Deep Agent answer (attempt %d): %s", attempt, parsed)

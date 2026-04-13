@@ -29,12 +29,67 @@ from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
+from langchain_core.callbacks import BaseCallbackHandler
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
 from nemo_retriever.tabular_data.retrieval.omni_lite.tools import build_omni_lite_tools
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
 
 logger = logging.getLogger(__name__)
+
+_SQL_BLOCK_SENTINEL = "__SQL_FROM_MESSAGE__"
+_SQL_BLOCK_START = "###SQL_START###"
+_SQL_BLOCK_END = "###SQL_END###"
+_SQL_BLOCK_RE = re.compile(
+    r"###SQL_START###\s*(.*?)\s*###SQL_END###",
+    re.DOTALL,
+)
+
+
+# ---------------------------------------------------------------------------
+# SQL capture callback
+# ---------------------------------------------------------------------------
+
+
+class _SQLCaptureCallback(BaseCallbackHandler):
+    """LangChain callback that captures AI messages containing SQL delimiters.
+
+    After the LLM generates a response that includes a ``###SQL_START###``
+    block, this callback appends the raw content to *store* before the tool
+    node runs — ensuring ``execute_sql`` can read the full SQL via
+    ``extract_sql_from_store``.
+    """
+
+    def __init__(self, store: list[str]) -> None:
+        super().__init__()
+        self._store = store
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        """Capture any AI response that contains the SQL delimiter block."""
+        try:
+            for gen_list in response.generations:
+                for gen in gen_list:
+                    # ChatGeneration has .message.content; plain Generation has .text
+                    content = getattr(getattr(gen, "message", None), "content", None)
+                    if content is None:
+                        content = getattr(gen, "text", "") or ""
+                    if _SQL_BLOCK_START in content:
+                        self._store.append(content)
+        except Exception:  # pragma: no cover — defensive
+            pass
+
+
+def extract_sql_from_store(store: list[str]) -> str | None:
+    """Return the SQL from the most recent ``###SQL_START###...###SQL_END###`` block.
+
+    Searches *store* newest-first so the latest generated SQL is always used.
+    """
+    for content in reversed(store):
+        m = _SQL_BLOCK_RE.search(content)
+        if m:
+            return m.group(1).strip()
+    return None
+
 
 _BASE_DIR = Path(__file__).resolve().parent
 
@@ -47,7 +102,10 @@ _REQUIRED_ANSWER_KEYS = frozenset({"sql_code", "answer", "result"})
 # ---------------------------------------------------------------------------
 
 
-def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any:
+def create_omni_lite_agent(
+    payload: AgentPayload,
+    llm: Any | None = None,
+) -> tuple[Any, list[str]]:
     """Create a Deep Agent for OmniLite Text-to-SQL.
 
     The agent is equipped with:
@@ -65,12 +123,16 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any
             called automatically.
 
     Returns:
-        A Deep Agent instance ready for ``agent.invoke()``.
+        Tuple of ``(agent, sql_store)`` where *sql_store* is the mutable list
+        that ``_SQLCaptureCallback`` will populate with AI messages containing
+        ``###SQL_START###`` blocks.  Pass the callback to ``agent.invoke``
+        config so it fires during execution.
     """
     if llm is None:
         llm = _make_llm()
 
-    tools = build_omni_lite_tools(payload, llm)
+    sql_store: list[str] = []
+    tools = build_omni_lite_tools(payload, llm, sql_store=sql_store)
 
     skill_dirs = _load_skill_dirs()
     agents_md = str(_BASE_DIR / "AGENTS.md")
@@ -94,7 +156,7 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any
         subagents=[],
         backend=FilesystemBackend(root_dir=str(_BASE_DIR)),
     )
-    return agent
+    return agent, sql_store
 
 
 def _load_skill_dirs() -> list[str]:
@@ -162,9 +224,13 @@ def format_omni_lite_user_prompt(
     parts.append(
         "Step 1 — call extract_entities with the question.\n"
         "Step 2 — call retrieve_semantic_candidates with the outputs of Step 1.\n"
-        "Step 3 — generate SQL using the retrieved tables, columns, FKs, and snippets.\n"
-        "Step 4 — call validate_sql on the generated SQL; if invalid, fix and retry.\n"
-        "Step 5 — call execute_sql with the validated SQL.\n"
+        "Step 3 — generate SQL; wrap it in your message like this (mandatory):\n"
+        "  ###SQL_START###\n"
+        "  <your SQL here>\n"
+        "  ###SQL_END###\n"
+        "Step 4 — call validate_sql on the SQL; if invalid, emit a new "
+        "###SQL_START###...###SQL_END### block with the fix and re-validate.\n"
+        "Step 5 — call execute_sql(sql='__SQL_FROM_MESSAGE__').\n"
         "Step 6 — emit your final answer as a single JSON object (no other text):\n"
         '  {"sql_code": "<exact SQL>", "answer": "<short explanation>", '
         '"result": <DB value or null>, "semantic_elements": []}\n'
@@ -320,6 +386,8 @@ def _extract_sql_from_prose(text: str) -> dict | None:
 
 __all__ = [
     "create_omni_lite_agent",
+    "extract_sql_from_store",
     "extract_structured_answer",
     "format_omni_lite_user_prompt",
+    "_SQLCaptureCallback",
 ]

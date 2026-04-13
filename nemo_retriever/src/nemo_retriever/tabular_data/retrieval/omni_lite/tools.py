@@ -246,19 +246,37 @@ def _make_validate_sql_tool(dialects: list[str] | None):
 # Tool 4 – execute_sql
 # ---------------------------------------------------------------------------
 
+_SQL_BLOCK_SENTINEL = "__SQL_FROM_MESSAGE__"
 
-def _make_execute_sql_tool(db_connector: Any):
-    """Return an ``execute_sql`` tool bound to *db_connector*."""
+
+def _make_execute_sql_tool(db_connector: Any, sql_store: list[str]):
+    """Return an ``execute_sql`` tool bound to *db_connector* and *sql_store*.
+
+    When the agent passes the sentinel ``__SQL_FROM_MESSAGE__`` as *sql*, the
+    tool extracts the actual SQL from the most recent
+    ``###SQL_START###...###SQL_END###`` block captured in *sql_store* by the
+    ``_SQLCaptureCallback``.  This bypasses JSON serialisation truncation of
+    the SQL argument entirely.
+    """
+    from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
+        extract_sql_from_store,
+    )
 
     @tool
     def execute_sql(sql: str) -> str:
         """Execute a validated SQL query and return the results.
 
         Call this AFTER validate_sql confirms the query is valid.
-        Pass ONLY plain SQL — no markdown fences or backticks.
+
+        IMPORTANT: always pass the sentinel string ``__SQL_FROM_MESSAGE__`` as
+        the ``sql`` argument.  The tool will automatically extract the full SQL
+        from the ``###SQL_START###...###SQL_END###`` block you included in your
+        previous message — this avoids any truncation caused by JSON
+        serialisation of the tool arguments.
 
         Args:
-            sql: The SQL to execute (DuckDB dialect, plain text).
+            sql: Pass the literal string ``__SQL_FROM_MESSAGE__`` (recommended)
+                or, as a fallback, plain SQL text with no markdown fences.
 
         Returns:
             JSON object with:
@@ -266,11 +284,34 @@ def _make_execute_sql_tool(db_connector: Any):
               - ``result``: list of row dicts (JSON-serialisable) or null
               - ``error``: error message string (empty on success)
         """
+        # Resolve actual SQL — prefer the store when the sentinel is used.
+        resolved_sql = sql
+        if sql.strip() == _SQL_BLOCK_SENTINEL:
+            extracted = extract_sql_from_store(sql_store)
+            if extracted:
+                logger.debug(
+                    "execute_sql: resolved SQL from store (%d chars)",
+                    len(extracted),
+                )
+                resolved_sql = extracted
+            else:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "result": None,
+                        "error": (
+                            "Sentinel '__SQL_FROM_MESSAGE__' received but no "
+                            "###SQL_START###...###SQL_END### block found in messages. "
+                            "Please include the SQL between the delimiters before calling."
+                        ),
+                    }
+                )
+
         if db_connector is None:
             return json.dumps({"success": False, "result": None, "error": "No db_connector provided in payload."})
         try:
             path_state = {"db_connector": db_connector}
-            response = _run_sql_duckdb(sql, path_state)
+            response = _run_sql_duckdb(resolved_sql, path_state)
             if response is None:
                 return json.dumps({"success": False, "result": None, "error": "Infra or auth error during execution."})
             if response.error:
@@ -295,7 +336,7 @@ def _make_execute_sql_tool(db_connector: Any):
 # ---------------------------------------------------------------------------
 
 
-def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
+def build_omni_lite_tools(payload: AgentPayload, llm: Any, sql_store: list[str] | None = None) -> list:
     """Build and return the list of LangChain tools for the OmniLite Deep Agent.
 
     Session-scoped values (``db_connector``, ``dialects``) are closed over so
@@ -308,6 +349,10 @@ def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
         payload: The ``AgentPayload`` received from the caller.
         llm: The LLM client (``ChatNVIDIA``) — used only by the Deep Agent
             itself, not by the retrieval tools.
+        sql_store: Mutable list shared with ``_SQLCaptureCallback``.  The
+            ``execute_sql`` tool reads from this list when it receives the
+            ``__SQL_FROM_MESSAGE__`` sentinel.  When ``None`` an empty list is
+            created (no capture callback will be attached).
 
     Returns:
         List of four bound LangChain tools in recommended call order:
@@ -315,12 +360,13 @@ def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
     """
     db_connector = payload.get("db_connector")
     dialects = payload.get("dialects") or []
+    store = sql_store if sql_store is not None else []
 
     return [
         _make_extract_entities_tool(),
         _make_retrieve_candidates_tool(),
         _make_validate_sql_tool(dialects),
-        _make_execute_sql_tool(db_connector),
+        _make_execute_sql_tool(db_connector, store),
     ]
 
 
