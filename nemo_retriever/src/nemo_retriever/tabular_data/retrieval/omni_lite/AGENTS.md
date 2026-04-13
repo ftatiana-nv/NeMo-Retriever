@@ -70,14 +70,11 @@ semantic snippets, then validate and execute as normal.
 
 ### Step 5 — execute_sql
 
-Call `execute_sql` with the **sentinel string `__SQL_FROM_MESSAGE__`** as the `sql` argument.
-The tool will automatically extract the full SQL from the `###SQL_START###...###SQL_END###` block
-you wrote in the previous step — this bypasses any JSON serialisation truncation.
-
-Example call: `execute_sql(sql="__SQL_FROM_MESSAGE__")`
+Call `execute_sql` with the validated SQL string.  You **MUST** call this tool — do NOT skip it
+and do NOT invent a result.  The `result` field in your final answer MUST come from this tool.
 
 If execution returns an error, fix the SQL (emit a new `###SQL_START###...###SQL_END###` block
-with the corrected SQL) and retry with `execute_sql(sql="__SQL_FROM_MESSAGE__")` again.
+with the corrected SQL), re-validate, and call `execute_sql` again.
 
 ---
 

@@ -230,7 +230,8 @@ def format_omni_lite_user_prompt(
         "  ###SQL_END###\n"
         "Step 4 — call validate_sql on the SQL; if invalid, emit a new "
         "###SQL_START###...###SQL_END### block with the fix and re-validate.\n"
-        "Step 5 — call execute_sql(sql='__SQL_FROM_MESSAGE__').\n"
+        "Step 5 — call execute_sql with the SQL. "
+        "YOU MUST call this tool — never skip it or invent a result.\n"
         "Step 6 — emit your final answer as a single JSON object (no other text):\n"
         '  {"sql_code": "<exact SQL>", "answer": "<short explanation>", '
         '"result": <DB value or null>, "semantic_elements": []}\n'
@@ -414,6 +415,11 @@ def _extract_sql_from_prose(text: str) -> dict | None:
     if not m:
         return None
     sql_code = m.group(1).strip()
+    if not sql_code:
+        return None
+    # Strip any stray ###SQL_END### / ###SQL_START### markers that the prose
+    # regex may capture when the LLM emits a partial delimiter block.
+    sql_code = re.sub(r"###SQL(?:_START|_END)###\s*", "", sql_code).strip()
     if not sql_code:
         return None
     # Use the text outside the SQL block as the answer

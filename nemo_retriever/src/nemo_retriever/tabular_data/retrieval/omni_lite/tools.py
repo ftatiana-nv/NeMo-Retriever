@@ -246,17 +246,15 @@ def _make_validate_sql_tool(dialects: list[str] | None):
 # Tool 4 – execute_sql
 # ---------------------------------------------------------------------------
 
-_SQL_BLOCK_SENTINEL = "__SQL_FROM_MESSAGE__"
-
 
 def _make_execute_sql_tool(db_connector: Any, sql_store: list[str]):
     """Return an ``execute_sql`` tool bound to *db_connector* and *sql_store*.
 
-    When the agent passes the sentinel ``__SQL_FROM_MESSAGE__`` as *sql*, the
-    tool extracts the actual SQL from the most recent
-    ``###SQL_START###...###SQL_END###`` block captured in *sql_store* by the
-    ``_SQLCaptureCallback``.  This bypasses JSON serialisation truncation of
-    the SQL argument entirely.
+    The tool always prefers the most recent ``###SQL_START###...###SQL_END###``
+    block captured by ``_SQLCaptureCallback`` in *sql_store*.  This ensures
+    the full, untruncated SQL is used even when the JSON-serialised *sql*
+    argument is cut short by the LLM.  The *sql* argument is used only as a
+    fallback when the store is empty.
     """
     from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
         extract_sql_from_store,
@@ -267,16 +265,15 @@ def _make_execute_sql_tool(db_connector: Any, sql_store: list[str]):
         """Execute a validated SQL query and return the results.
 
         Call this AFTER validate_sql confirms the query is valid.
+        Pass the SQL as plain text — no markdown fences or backticks.
 
-        IMPORTANT: always pass the sentinel string ``__SQL_FROM_MESSAGE__`` as
-        the ``sql`` argument.  The tool will automatically extract the full SQL
-        from the ``###SQL_START###...###SQL_END###`` block you included in your
-        previous message — this avoids any truncation caused by JSON
-        serialisation of the tool arguments.
+        The tool internally recovers the full SQL from the
+        ``###SQL_START###...###SQL_END###`` block you included in your message,
+        so even if the argument is truncated by JSON serialisation the correct
+        query is executed.
 
         Args:
-            sql: Pass the literal string ``__SQL_FROM_MESSAGE__`` (recommended)
-                or, as a fallback, plain SQL text with no markdown fences.
+            sql: The validated SQL to execute (DuckDB dialect, plain text).
 
         Returns:
             JSON object with:
@@ -284,28 +281,22 @@ def _make_execute_sql_tool(db_connector: Any, sql_store: list[str]):
               - ``result``: list of row dicts (JSON-serialisable) or null
               - ``error``: error message string (empty on success)
         """
-        # Resolve actual SQL — prefer the store when the sentinel is used.
-        resolved_sql = sql
-        if sql.strip() == _SQL_BLOCK_SENTINEL:
-            extracted = extract_sql_from_store(sql_store)
-            if extracted:
-                logger.debug(
-                    "execute_sql: resolved SQL from store (%d chars)",
-                    len(extracted),
-                )
-                resolved_sql = extracted
-            else:
-                return json.dumps(
-                    {
-                        "success": False,
-                        "result": None,
-                        "error": (
-                            "Sentinel '__SQL_FROM_MESSAGE__' received but no "
-                            "###SQL_START###...###SQL_END### block found in messages. "
-                            "Please include the SQL between the delimiters before calling."
-                        ),
-                    }
-                )
+        # Always prefer the captured store — it holds the full, untruncated SQL
+        # from the ###SQL_START###...###SQL_END### block in the agent message.
+        # Fall back to the argument only when the store has no entry yet.
+        store_sql = extract_sql_from_store(sql_store)
+        if store_sql:
+            logger.debug(
+                "execute_sql: using SQL from store (%d chars)",
+                len(store_sql),
+            )
+            resolved_sql = store_sql
+        else:
+            logger.debug(
+                "execute_sql: store empty — using sql argument (%d chars)",
+                len(sql),
+            )
+            resolved_sql = sql
 
         if db_connector is None:
             return json.dumps({"success": False, "result": None, "error": "No db_connector provided in payload."})
