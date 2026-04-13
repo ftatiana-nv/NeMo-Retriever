@@ -16,16 +16,32 @@ unambiguous within the query's source tables.
 
 Pass ``all_schemas={}`` (the default) to skip schema-assisted resolution
 and rely solely on ``qualify()``.
-
-Usage (standalone):
-    python sqlglot_extractor.py [--dialect <dialect>]
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import sqlglot
 from sqlglot import exp
 from sqlglot.optimizer.qualify import qualify
+
+
+@dataclass
+class TableMatch:
+    """Extraction result for a single source table.
+
+    Attributes
+    ----------
+    columns:
+        Set of column names referenced in the SQL for this table.
+    schema_name:
+        The ``all_schemas`` key (Neo4j schema name) that owns this table,
+        or ``None`` when the owning schema could not be determined.
+    """
+
+    columns: set[str] = field(default_factory=set)
+    schema_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -90,8 +106,8 @@ def extract_tables_and_columns(
     sql: str,
     dialect: str = "sqlite",
     all_schemas: dict = {},
-) -> dict[str, set[str]]:
-    """Return ``{table_name: {column, ...}}`` for all real source tables in *sql*.
+) -> dict[str, TableMatch]:
+    """Return ``{table_name: TableMatch}`` for all real source tables in *sql*.
 
     Parameters
     ----------
@@ -107,9 +123,10 @@ def extract_tables_and_columns(
     Returns
     -------
     dict
-        ``{table_name: set_of_column_names}``.
-        Keys are qualified (``schema.table``) when the SQL uses a schema prefix,
-        or bare (``table``) otherwise.
+        ``{table_key: TableMatch}`` where ``table_key`` is ``"schema.table"``
+        when the SQL uses a schema prefix, or bare ``"table"`` otherwise.
+        ``TableMatch.schema_name`` carries the ``all_schemas`` key that owns
+        the table (``None`` when it could not be determined).
     """
     try:
         statement = sqlglot.parse_one(sql, dialect=dialect)
@@ -134,7 +151,38 @@ def extract_tables_and_columns(
     # alias → real table name (e.g. "o" → "orders")
     alias_map = _alias_to_table_map(statement, cte_names)
 
-    result: dict[str, set[str]] = {t: set() for t in source_table_names}
+    # Pre-build table_key → schema_key so every TableMatch knows its owner.
+    #
+    # Two-pass strategy to avoid scanning every table in every schema:
+    #   1. Schema-qualified keys ("schema_a.orders") — the schema name is
+    #      already embedded; resolve directly against all_schemas keys.
+    #   2. Bare keys ("orders") — only look up the tables we actually need,
+    #      stopping as soon as all are resolved.
+    table_to_schema: dict[str, str] = {}
+    bare_tables: set[str] = set()
+    schema_keys_lower = {k.lower() for k in all_schemas}
+
+    for tbl_key in source_table_names:
+        if "." in tbl_key:
+            schema_part, _ = tbl_key.split(".", 1)
+            if schema_part in schema_keys_lower:
+                table_to_schema[tbl_key] = schema_part
+        else:
+            bare_tables.add(tbl_key)
+
+    for schema_key, s in all_schemas.items():
+        if not bare_tables:
+            break
+        skey = schema_key.lower()
+        for tbl in list(bare_tables):
+            if s.table_exists(tbl):
+                table_to_schema[tbl] = skey
+                bare_tables.discard(tbl)
+
+    result: dict[str, TableMatch] = {
+        t: TableMatch(schema_name=table_to_schema.get(t))
+        for t in source_table_names
+    }
     unresolved: set[str] = set()
 
     # qualify() mutates the AST in-place, rewriting USING into ON — extract
@@ -209,7 +257,7 @@ def extract_tables_and_columns(
         table_ref = col.table.lower() if col.table else None
         real_table = alias_map.get(table_ref) if table_ref else None
         if real_table and real_table in source_table_names:
-            result[real_table].add(col_name)
+            result[real_table].columns.add(col_name)
         elif not table_ref or table_ref in cte_names:
             # Bare / CTE-referencing column — candidate for schema-assisted lookup.
             unresolved.add(col_name)
@@ -238,98 +286,14 @@ def extract_tables_and_columns(
         for col_name in unresolved:
             candidates = col_to_tables.get(col_name, [])
             if len(candidates) == 1:
-                result[candidates[0]].add(col_name)
+                result[candidates[0]].columns.add(col_name)
             elif len(candidates) > 1 and col_name in join_keys:
                 # Cross-validate: only attribute to tables that are both in the
                 # schema candidates AND in the actual USING join for this column.
                 matched = [t for t in candidates if t in join_keys[col_name]]
                 for tbl in (matched or candidates):
-                    result[tbl].add(col_name)
+                    result[tbl].columns.add(col_name)
             # else: ambiguous — omit rather than guess.
 
     # Drop real-table entries that ended up with no columns attributed.
-    return {k: v for k, v in result.items() if v}
-
-
-# ---------------------------------------------------------------------------
-# Example SQL
-# ---------------------------------------------------------------------------
-
-_EXAMPLE_SQL = """
-WITH RecencyScore AS (
-    SELECT customer_unique_id,
-           MAX(order_purchase_timestamp) AS last_purchase,
-           NTILE(5) OVER (ORDER BY MAX(order_purchase_timestamp) DESC) AS recency
-    FROM orders
-        JOIN customers USING (customer_id)
-    WHERE order_status = 'delivered'
-    GROUP BY customer_unique_id
-),
-FrequencyScore AS (
-    SELECT customer_unique_id,
-           COUNT(order_id) AS total_orders,
-           NTILE(5) OVER (ORDER BY COUNT(order_id) DESC) AS frequency
-    FROM orders
-        JOIN customers USING (customer_id)
-    WHERE order_status = 'delivered'
-    GROUP BY customer_unique_id
-),
-MonetaryScore AS (
-    SELECT customer_unique_id,
-           SUM(price) AS total_spent,
-           NTILE(5) OVER (ORDER BY SUM(price) DESC) AS monetary
-    FROM orders
-        JOIN order_items USING (order_id)
-        JOIN customers USING (customer_id)
-    WHERE order_status = 'delivered'
-    GROUP BY customer_unique_id
-),
-RFM AS (
-    SELECT last_purchase, total_orders, total_spent,
-        CASE
-            WHEN recency = 1 AND frequency + monetary IN (1, 2, 3, 4) THEN 'Champions'
-            WHEN recency IN (4, 5) AND frequency + monetary IN (1, 2) THEN 'Can''t Lose Them'
-            WHEN recency IN (4, 5) AND frequency + monetary IN (3, 4, 5, 6) THEN 'Hibernating'
-            WHEN recency IN (4, 5) AND frequency + monetary IN (7, 8, 9, 10) THEN 'Lost'
-            WHEN recency IN (2, 3) AND frequency + monetary IN (1, 2, 3, 4) THEN 'Loyal Customers'
-            WHEN recency = 3 AND frequency + monetary IN (5, 6) THEN 'Needs Attention'
-            WHEN recency = 1 AND frequency + monetary IN (7, 8) THEN 'Recent Users'
-            WHEN recency = 1 AND frequency + monetary IN (5, 6) OR
-                recency = 2 AND frequency + monetary IN (5, 6, 7, 8) THEN 'Potential Loyalists'
-            WHEN recency = 1 AND frequency + monetary IN (9, 10) THEN 'Price Sensitive'
-            WHEN recency = 2 AND frequency + monetary IN (9, 10) THEN 'Promising'
-            WHEN recency = 3 AND frequency + monetary IN (7, 8, 9, 10) THEN 'About to Sleep'
-        END AS RFM_Bucket
-    FROM RecencyScore
-        JOIN FrequencyScore USING (customer_unique_id)
-        JOIN MonetaryScore USING (customer_unique_id)
-)
-SELECT RFM_Bucket,
-       AVG(total_spent / total_orders) AS avg_sales_per_customer
-FROM RFM
-GROUP BY RFM_Bucket
-"""
-
-
-if __name__ == "__main__":
-    import argparse
-
-    import pandas as pd
-
-    parser = argparse.ArgumentParser(description="Extract tables and columns from SQL.")
-    parser.add_argument("--dialect", default="sqlite", help="SQL dialect (default: sqlite)")
-    args = parser.parse_args()
-
-    from nemo_retriever.tabular_data.ingestion.services.schema import get_account_schemas
-    all_schemas = get_account_schemas()
-
-    tables_and_columns = extract_tables_and_columns(
-        _EXAMPLE_SQL, dialect=args.dialect, all_schemas=all_schemas
-    )
-
-    print(f"Tables and columns extracted (dialect={args.dialect!r}):")
-    print("=" * 50)
-    for table, columns in sorted(tables_and_columns.items()):
-        print(f"\n  {table}")
-        for col in sorted(columns):
-            print(f"    - {col}")
+    return {k: v for k, v in result.items() if v.columns}

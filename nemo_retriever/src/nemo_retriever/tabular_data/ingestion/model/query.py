@@ -8,11 +8,9 @@ class Query:
         schemas,
         id,
         q,
-        utterance,
         ltimestamp,
         count,
         sql_node=None,
-        default_schema=None,
         dialect=None,
         query_tag=None,
     ):
@@ -35,8 +33,6 @@ class Query:
                 "last_query_timestamp": ltimestamp,
                 "query_tag": query_tag,
             }
-            if utterance is not None:
-                props["description"] = utterance.replace('"', '\\"')
             sql_node = Neo4jNode(
                 name="query_" + str(id), label=Labels.SQL, props=props, existing_id=id
             )
