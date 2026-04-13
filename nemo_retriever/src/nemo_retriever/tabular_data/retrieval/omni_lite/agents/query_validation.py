@@ -120,7 +120,7 @@ def query_validation(
     schemas,
     sql: str,
     dialects: list,
-    user_participants: list,
+    user_participants: list = None,
     fks=None,
 ):
     # Validation temporarily bypassed — always returns success.

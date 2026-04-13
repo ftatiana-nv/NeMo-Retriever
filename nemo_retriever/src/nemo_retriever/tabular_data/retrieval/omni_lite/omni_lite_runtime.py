@@ -184,6 +184,9 @@ def extract_structured_answer(result: dict) -> dict | None:
     Tries in order:
     1. Full JSON object with all required keys.
     2. Markdown-style answer with a ```sql block.
+    3. Plain-prose SQL — a SQL statement starting at a line boundary and
+       delimited by blank lines or end-of-text (handles cases where the agent
+       embeds the query inline without fences or JSON).
 
     Args:
         result: The dict returned by ``agent.invoke()``.
@@ -201,6 +204,9 @@ def extract_structured_answer(result: dict) -> dict | None:
             md = _parse_markdown_answer(content)
             if md is not None:
                 return md
+            prose = _extract_sql_from_prose(content)
+            if prose is not None:
+                return prose
         elif isinstance(content, dict):
             if _REQUIRED_ANSWER_KEYS.issubset(content.keys()):
                 return content
@@ -267,6 +273,49 @@ def _parse_markdown_answer(text: str) -> dict | None:
     if sql_code and answer:
         return {"sql_code": sql_code, "answer": answer, "result": result_value}
     return None
+
+
+# Matches a SQL statement that starts at the beginning of a line with a SQL
+# keyword and continues until the next blank line (two consecutive newlines)
+# or end-of-string.  Works regardless of trailing prose or embedded values.
+_SQL_PROSE_RE = re.compile(
+    r"(?m)^" r"((?:SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|EXPLAIN)\b" r".*?)" r"(?=\n[ \t]*\n|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _extract_sql_from_prose(text: str) -> dict | None:
+    """Extract SQL embedded in plain prose (no fences, no JSON).
+
+    Locates the first SQL statement that starts at a line boundary (identified
+    by a leading SQL keyword) and is delimited by a blank line or end-of-text.
+    The surrounding prose becomes the ``answer``.
+
+    Example input::
+
+        Based on the results, the query is:
+
+        SELECT a, b FROM t WHERE x = 'foo'
+
+        This selects rows where x equals 'foo'.
+
+    Args:
+        text: Raw message content string.
+
+    Returns:
+        ``{"sql_code", "answer", "result"}`` dict or ``None`` if no SQL found.
+    """
+    m = _SQL_PROSE_RE.search(text)
+    if not m:
+        return None
+    sql_code = m.group(1).strip()
+    if not sql_code:
+        return None
+    # Use the text outside the SQL block as the answer
+    answer = text[: m.start()].strip() + " " + text[m.end() :].strip()
+    answer = re.sub(r"\s+", " ", answer).strip()
+    logger.debug("_extract_sql_from_prose: extracted SQL from prose (%d chars)", len(sql_code))
+    return {"sql_code": sql_code, "answer": answer or text.strip(), "result": None, "semantic_elements": []}
 
 
 __all__ = [

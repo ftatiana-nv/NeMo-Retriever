@@ -34,11 +34,11 @@ from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
     clean_results,
     dedupe_merge_relevant_tables,
     extract_candidates,
-    get_all_schemas_ids,
+    # get_all_schemas_ids,  # re-enable with validation
     get_relevant_fks_from_candidates_tables,
     get_relevant_queries,
     get_relevant_tables,
-    get_schemas_slim,
+    # get_schemas_slim,  # re-enable with validation
     Labels,
 )
 
@@ -215,8 +215,11 @@ def _make_validate_sql_tool(dialects: list[str] | None):
               - ``sql_columns``: list of column IDs referenced by the query
         """
         try:
-            schemas = get_schemas_slim(list(get_all_schemas_ids()))
-            result = query_validation(schemas, sql, _dialects)
+            # Schema loading skipped while query_validation is bypassed.
+            # Re-enable alongside the validation body in query_validation.py:
+            #   schemas = get_schemas_slim(list(get_all_schemas_ids()))
+            #   result = query_validation(schemas, sql, _dialects, user_participants=[])
+            result = query_validation(None, sql, _dialects, user_participants=[])
             if result.get("error"):
                 return json.dumps(
                     {
