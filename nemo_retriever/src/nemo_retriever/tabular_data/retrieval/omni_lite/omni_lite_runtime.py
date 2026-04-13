@@ -250,7 +250,8 @@ def extract_structured_answer(result: dict) -> dict | None:
     Tries in order:
     1. Full JSON object with all required keys.
     2. Markdown-style answer with a ```sql block.
-    3. Plain-prose SQL — a SQL statement starting at a line boundary and
+    3. ``###SQL_START###...###SQL_END###`` delimiter block (new protocol).
+    4. Plain-prose SQL — a SQL statement starting at a line boundary and
        delimited by blank lines or end-of-text (handles cases where the agent
        embeds the query inline without fences or JSON).
 
@@ -270,6 +271,9 @@ def extract_structured_answer(result: dict) -> dict | None:
             md = _parse_markdown_answer(content)
             if md is not None:
                 return md
+            delim = _extract_sql_from_delimiters(content)
+            if delim is not None:
+                return delim
             prose = _extract_sql_from_prose(content)
             if prose is not None:
                 return prose
@@ -339,6 +343,41 @@ def _parse_markdown_answer(text: str) -> dict | None:
     if sql_code and answer:
         return {"sql_code": sql_code, "answer": answer, "result": result_value}
     return None
+
+
+def _extract_sql_from_delimiters(text: str) -> dict | None:
+    """Extract SQL from a ``###SQL_START###...###SQL_END###`` delimiter block.
+
+    This is the primary extraction path when the agent follows the new
+    delimiter protocol introduced alongside the ``__SQL_FROM_MESSAGE__``
+    sentinel.  The surrounding text (outside the block) is used as the answer.
+
+    Args:
+        text: Raw message content string.
+
+    Returns:
+        ``{"sql_code", "answer", "result", "semantic_elements"}`` dict or
+        ``None`` if no delimiter block is found.
+    """
+    m = _SQL_BLOCK_RE.search(text)
+    if not m:
+        return None
+    sql_code = m.group(1).strip()
+    if not sql_code:
+        return None
+    # Everything outside the delimiter block becomes the answer.
+    surrounding = (text[: m.start()] + text[m.end() :]).strip()
+    surrounding = re.sub(r"\s+", " ", surrounding).strip()
+    logger.debug(
+        "_extract_sql_from_delimiters: extracted SQL from delimiters (%d chars)",
+        len(sql_code),
+    )
+    return {
+        "sql_code": sql_code,
+        "answer": surrounding or text.strip(),
+        "result": None,
+        "semantic_elements": [],
+    }
 
 
 # Matches a SQL statement that starts at the beginning of a line with a SQL
