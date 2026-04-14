@@ -22,9 +22,6 @@ from langchain_core.tools import tool
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_execution import (
-    _run_sql_duckdb,
-)
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.query_validation import (
     query_validation,
 )
@@ -303,19 +300,8 @@ def _make_execute_sql_tool(db_connector: Any):
         if db_connector is None:
             return json.dumps({"success": False, "result": None, "error": "No db_connector provided in payload."})
         try:
-            path_state = {"db_connector": db_connector}
-            response = _run_sql_duckdb(sql, path_state)
-            if response is None:
-                return json.dumps({"success": False, "result": None, "error": "Infra or auth error during execution."})
-            if response.error:
-                return json.dumps({"success": False, "result": None, "error": response.error})
-            raw = response.result
-            result_data = None
-            if raw:
-                try:
-                    result_data = json.loads(raw[0]) if isinstance(raw[0], str) else raw
-                except Exception:
-                    result_data = raw
+            df = db_connector.execute(sql)
+            result_data = df.to_dict(orient="records") if df is not None and not df.empty else []
             return json.dumps({"success": True, "result": result_data, "error": ""}, default=str)
         except Exception as exc:
             logger.warning("execute_sql failed: %s", exc)
