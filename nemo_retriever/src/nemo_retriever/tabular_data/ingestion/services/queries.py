@@ -6,13 +6,15 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.utils import chunks
 from tqdm import tqdm
 
-from nemo_retriever.tabular_data.ingestion.parsers.sql.queries_parser import pre_process
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
 
 
 from nemo_retriever.tabular_data.ingestion.model.query import Query
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
-from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import extract_tables_and_columns
+from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
+    TableMatch,
+    extract_tables_and_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,47 +28,51 @@ def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> b
 
     Returns True when at least one recognised table was found, False otherwise.
     """
-    tables_and_columns: dict[str, set[str]] = extract_tables_and_columns(
+    table_matches: dict[str, TableMatch] = extract_tables_and_columns(
         sql=q,
         dialect=dialect,
         all_schemas=schemas,
     )
 
-    if not tables_and_columns:
+    if not table_matches:
         return False
 
     column_ids: list[str] = []
-    for table_name, columns in tables_and_columns.items():
-        if table_name == "<unresolved>":
+    for table_key, match in table_matches.items():
+        # table_key may be "schema.table" or just "table"; bare name is always the last part.
+        bare_name = table_key.split(".")[-1]
+
+        # Use the schema identified by the extractor directly; fall back to scanning
+        # all schemas when the owning schema could not be determined.
+        schema = schemas.get(match.schema_name) if match.schema_name else None
+        if schema is None:
+            for s in schemas.values():
+                if s.table_exists(bare_name):
+                    schema = s
+                    break
+
+        if schema is None:
+            logger.debug("Table %r not found in any schema – skipping.", bare_name)
             continue
 
-        table_node = None
-        for schema in schemas.values():
-            if schema.table_exists(table_name):
-                try:
-                    table_node = schema.get_table_node(table_name)
-                except Exception:
-                    continue
-                break
-
-        if table_node is None:
-            logger.debug("Table %r not found in any schema – skipping.", table_name)
+        try:
+            table_node = schema.get_table_node(bare_name)
+        except Exception:
+            logger.debug("Failed to get table node for %r – skipping.", bare_name)
             continue
 
-        query_obj.add_table_to_query(table_node, table_name)
+        query_obj.add_table_to_query(table_node, bare_name)
         edge_props = {Props.SQL_ID: str(query_obj.id)}
         query_obj.edges.append((query_obj.sql_node, table_node, edge_props))
 
-        for col_name in columns:
-            for schema in schemas.values():
-                try:
-                    if schema.is_column_in_table(table_node, col_name):
-                        col_node = schema.get_column_node(col_name, table_name)
-                        column_ids.append(str(col_node.id))
-                        query_obj.edges.append((query_obj.sql_node, col_node, edge_props))
-                        break
-                except Exception:
-                    continue
+        for col_name in match.columns:
+            try:
+                if schema.is_column_in_table(table_node, col_name):
+                    col_node = schema.get_column_node(col_name, bare_name)
+                    column_ids.append(str(col_node.id))
+                    query_obj.edges.append((query_obj.sql_node, col_node, edge_props))
+            except Exception:
+                continue
 
     query_obj.set_reached_columns_ids(column_ids)
     return bool(query_obj.get_tables_ids())
@@ -74,36 +80,25 @@ def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> b
 
 def parse_queries_df(
     dialect: str,
-    failed_queries: list[dict[str, str]],
     parsed_queries: dict[str, Query],
     queries_df: pd.DataFrame,
     schemas: dict,
-):
-    failed_indexes = []
-    for index, row in queries_df.iterrows():
+) -> list[dict[str, str]]:
+    failed_queries: list[dict[str, str]] = []
+    for _, row in queries_df.iterrows():
         try:
-            sql_id = (
-                str(row["id"])
-                if "id" in row and not (pd.isna(row["id"]) or not row["id"])
-                else str(uuid.uuid4())
-            )
-            q = pre_process(row["query_text"])
-            q_utterance = row["utterance"] if "utterance" in row else None
+            sql_id = str(uuid.uuid4())
+            q = row["query_text"]
             q_timestamp = row["end_time"]
             q_count = row["count"] if "count" in row else 1
             q_count = int(q_count) if isinstance(q_count, str) else q_count
-            default_schema = (
-                row["schema"] if "schema" in row and len(row["schema"]) > 0 else None
-            )
             q_tag = row["query_tag"] if "query_tag" in row else None
             query_obj = Query(
                 schemas=schemas,
                 id=sql_id,
                 q=q,
-                utterance=q_utterance,
                 ltimestamp=q_timestamp,
                 count=q_count,
-                default_schema=default_schema,
                 dialect=dialect,
                 query_tag=q_tag,
             )
@@ -122,8 +117,7 @@ def parse_queries_df(
             logger.info("Failed parsing query")
             logger.exception(err)
             failed_queries.append(row)
-            failed_indexes.append(index)
-    return failed_indexes
+    return failed_queries
 
 
 def populate_queries(
@@ -137,11 +131,9 @@ def populate_queries(
         queries_chunks = list(chunks(queries_df.to_dict(orient="records"), 500))
         for i, chunk in enumerate(queries_chunks):
             logger.info(f"chunk {i + 1} out of {len(queries_chunks)} chunks")
-            chunk_failed: list[dict[str, str]] = []
             parsed_queries: dict[str, Query] = {}
-            parse_queries_df(
+            chunk_failed = parse_queries_df(
                 dialect=dialect,
-                failed_queries=chunk_failed,
                 parsed_queries=parsed_queries,
                 queries_df=pd.DataFrame(chunk),
                 schemas=schemas,

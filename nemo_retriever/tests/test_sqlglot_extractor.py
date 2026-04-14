@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
+    TableMatch,
     extract_tables_and_columns,
 )
 
@@ -23,6 +24,11 @@ class _MockSchema:
 
     def __init__(self, rows: list[dict]):
         self.columns_df = pd.DataFrame(rows)
+
+    def table_exists(self, table_name: str) -> bool:
+        if self.columns_df is None or self.columns_df.empty:
+            return False
+        return table_name.lower() in self.columns_df["table_name"].str.lower().values
 
 
 # Shared schema covering all tables used by the test queries below.
@@ -142,23 +148,31 @@ def test_rfm_query_tables():
     assert set(result.keys()) == {"orders", "customers", "order_items"}
 
 
+def test_rfm_query_schema_name():
+    """Each table resolves to the owning schema key."""
+    result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    assert result["orders"].schema_name == "ecommerce"
+    assert result["customers"].schema_name == "ecommerce"
+    assert result["order_items"].schema_name == "ecommerce"
+
+
 def test_rfm_query_orders_columns():
     """orders: join-key customer_id, join-key order_id, filter order_status,
     aggregation column order_purchase_timestamp."""
     result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["orders"] == {"order_id", "customer_id", "order_status", "order_purchase_timestamp"}
+    assert result["orders"].columns == {"order_id", "customer_id", "order_status", "order_purchase_timestamp"}
 
 
 def test_rfm_query_customers_columns():
     """customers: join-key customer_id, grouping/select customer_unique_id."""
     result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["customers"] == {"customer_id", "customer_unique_id"}
+    assert result["customers"].columns == {"customer_id", "customer_unique_id"}
 
 
 def test_rfm_query_order_items_columns():
     """order_items: join-key order_id, aggregation column price."""
     result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["order_items"] == {"order_id", "price"}
+    assert result["order_items"].columns == {"order_id", "price"}
 
 
 def test_clv_query_tables():
@@ -170,28 +184,35 @@ def test_clv_query_tables():
 def test_clv_query_customers_columns():
     """customers: join-key customer_id, select/group-by customer_unique_id."""
     result = extract_tables_and_columns(_SQL_CLV, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["customers"] == {"customer_id", "customer_unique_id"}
+    assert result["customers"].columns == {"customer_id", "customer_unique_id"}
 
 
 def test_clv_query_orders_columns():
     """orders: join-key customer_id, explicit order_id reference, timestamp aggregations."""
     result = extract_tables_and_columns(_SQL_CLV, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["orders"] == {"customer_id", "order_id", "order_purchase_timestamp"}
+    assert result["orders"].columns == {"customer_id", "order_id", "order_purchase_timestamp"}
 
 
 def test_clv_query_order_payments_columns():
     """order_payments: join-key order_id, aggregation column payment_value."""
     result = extract_tables_and_columns(_SQL_CLV, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
-    assert result["order_payments"] == {"order_id", "payment_value"}
+    assert result["order_payments"].columns == {"order_id", "payment_value"}
+
+
+def test_no_schema_name_when_schemas_empty():
+    """Without all_schemas, schema_name is None for every table."""
+    result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas={})
+    for match in result.values():
+        assert match.schema_name is None
 
 
 def test_no_schema_returns_subset():
     """Without schema assistance qualify() still resolves explicitly-qualified columns."""
     result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas={})
     # join-key columns resolved via qualify's USING→ON expansion must be present
-    assert "customer_id" in result.get("orders", set())
-    assert "customer_id" in result.get("customers", set())
-    assert "order_id" in result.get("order_items", set())
+    assert "customer_id" in result.get("orders", TableMatch()).columns
+    assert "customer_id" in result.get("customers", TableMatch()).columns
+    assert "order_id" in result.get("order_items", TableMatch()).columns
 
 
 def test_empty_sql_returns_empty():
