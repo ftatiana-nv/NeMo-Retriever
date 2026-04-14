@@ -6,7 +6,6 @@ attribute consumed by ``extract_tables_and_columns``.
 """
 
 import pandas as pd
-import pytest
 
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
     TableMatch,
