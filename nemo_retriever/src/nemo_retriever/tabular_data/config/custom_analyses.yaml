@@ -1,0 +1,66 @@
+# Custom Analyses Configuration
+#
+# Define reusable "gold SQL" snippets that encode tribal knowledge about the
+# database. The Text-To-SQL agent uses these as reference when constructing
+# queries — if a user question matches an analysis, the agent can adapt the
+# provided SQL instead of generating from scratch.
+#
+# Each entry has:
+#   name        - human-readable analysis name
+#   description - what the analysis calculates / returns
+#   sql         - the reference SQL snippet (gold SQL)
+
+custom_analyses:
+  - name: "Top Rated Movies by Country"
+    description: "Returns the highest-rated movie in each country based on average rating."
+    sql: |
+      SELECT m.country, m.title, r.avg_rating
+      FROM movies m
+      JOIN ratings r ON m.id = r.movie_id
+      WHERE r.avg_rating = (
+          SELECT MAX(r2.avg_rating)
+          FROM movies m2
+          JOIN ratings r2 ON m2.id = r2.movie_id
+          WHERE m2.country = m.country
+      )
+      ORDER BY r.avg_rating DESC
+
+  - name: "Most Prolific Actors"
+    description: "Finds the top 10 actors by number of movies they appeared in, along with the average rating of those movies."
+    sql: |
+      SELECT
+          n.name,
+          COUNT(DISTINCT rm.movie_id) AS movie_count,
+          ROUND(AVG(r.avg_rating), 2) AS avg_movie_rating
+      FROM names n
+      JOIN role_mapping rm ON n.id = rm.name_id
+      JOIN ratings r ON rm.movie_id = r.movie_id
+      WHERE rm.category = 'actor'
+      GROUP BY n.name
+      ORDER BY movie_count DESC
+      LIMIT 10
+
+  - name: "Movies Longer Than Average Duration by Year"
+    description: "Lists movies whose duration exceeds the average duration for their release year."
+    sql: |
+      SELECT m.title, m.year, m.duration
+      FROM movies m
+      WHERE m.duration > (
+          SELECT AVG(m2.duration)
+          FROM movies m2
+          WHERE m2.year = m.year
+      )
+      ORDER BY m.year DESC, m.duration DESC
+
+  - name: "User Session Activity Summary"
+    description: "Counts the number of actions per user session from the access log."
+    sql: |
+      SELECT
+          user_id,
+          session,
+          COUNT(*) AS action_count,
+          MIN(stamp) AS session_start,
+          MAX(stamp) AS session_end
+      FROM access_log
+      GROUP BY user_id, session
+      ORDER BY session_start DESC
