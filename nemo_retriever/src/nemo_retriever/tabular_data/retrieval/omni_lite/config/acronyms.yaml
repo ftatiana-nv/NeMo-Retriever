@@ -1,0 +1,62 @@
+# Custom Acronyms Configuration
+#
+# Define company/department/database-specific acronyms that the Text-To-SQL
+# agent should understand when interpreting user questions.
+#
+# Each entry has:
+#   acronym     - the short form (case-insensitive matching)
+#   definition  - what it stands for / means
+#   data_objects - (optional) related tables, columns, or schemas
+#
+# Example: if a user asks "show GTC attendees", the agent will know
+# GTC = GPU Technology Conference and can map it to the right tables.
+
+acronyms:
+  - acronym: "GTC"
+    definition: "GPU Technology Conference"
+    data_objects:
+      - "events.gtc_registrations"
+      - "events.gtc_sessions"
+
+  - acronym: "S3"
+    definition: "The AWS file storage service"
+
+  - acronym: "ARR"
+    definition: "Annual Recurring Revenue"
+    data_objects:
+      - "finance.revenue_monthly"
+
+  - acronym: "DAU"
+    definition: "Daily Active Users"
+    data_objects:
+      - "analytics.user_activity"
+
+  - acronym: "MRR"
+    definition: "Monthly Recurring Revenue"
+
+  - acronym: "COGS"
+    definition: "Cost of Goods Sold"
+    data_objects:
+      - "finance.cost_breakdown"
+
+  - acronym: "NPS"
+    definition: "Net Promoter Score"
+    data_objects:
+      - "surveys.nps_responses"
+
+  - acronym: "SKU"
+    definition: "Stock Keeping Unit"
+    data_objects:
+      - "inventory.products"
+
+  - acronym: "PO"
+    definition: "Purchase Order"
+    data_objects:
+      - "procurement.purchase_orders"
+      - "procurement.purchase_order_lines"
+
+  - acronym: "YoY"
+    definition: "Year over Year comparison"
+
+  - acronym: "QoQ"
+    definition: "Quarter over Quarter comparison"
