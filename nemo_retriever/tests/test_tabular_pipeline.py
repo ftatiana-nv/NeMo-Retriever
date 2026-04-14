@@ -210,8 +210,8 @@ def test_store_relational_db_in_neo4j_delegates_to_populate(monkeypatch):
         lambda data, num_workers, dialect: calls.append({"data": data, "num_workers": num_workers, "dialect": dialect}),
     )
 
-    dummy_data = {k: pd.DataFrame() for k in ("tables", "columns", "views", "pks", "fks")}
-    store_relational_db_in_neo4j(data=dummy_data)
+    dummy_data = {k: pd.DataFrame() for k in ("tables", "columns", "views", "pks", "fks", "queries")}
+    store_relational_db_in_neo4j(data=dummy_data, dialect="duckdb")
 
     assert len(calls) == 1
     assert calls[0]["data"] is dummy_data
