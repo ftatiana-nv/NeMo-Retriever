@@ -46,6 +46,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _strip_sql_fences(sql: str) -> str:
+    """Strip markdown code fences from a SQL string.
+
+    The agent is instructed to wrap SQL in triple-backtick fences
+    (````sql ... ```) to prevent double-quote characters from breaking
+    the JSON tool-call payload.  This helper removes those fences so the
+    underlying validation and execution layers always receive plain SQL.
+
+    Handles:
+    - ````sql\\n...\\n```` (language tag)
+    - ` ``` \\n...\\n``` ` (no language tag)
+    - Plain SQL with no fences (returned unchanged)
+    """
+    stripped = sql.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        # Drop opening fence line (```sql or ```)
+        start = 1
+        # Drop closing fence line if present
+        end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
+        return "\n".join(lines[start:end]).strip()
+    return sql
+
+
+# ---------------------------------------------------------------------------
 # Tool 1 – extract_entities
 # ---------------------------------------------------------------------------
 
@@ -206,7 +235,9 @@ def _make_validate_sql_tool(dialects: list[str] | None):
         Call this AFTER generating SQL and BEFORE execute_sql.
 
         Args:
-            sql: The SQL string to validate (no markdown fences, plain SQL only).
+            sql: The SQL string to validate.  May be wrapped in triple-backtick
+                markdown fences (``\\`\\`\\`sql ... \\`\\`\\``); fences are stripped
+                automatically before validation.
 
         Returns:
             JSON object with:
@@ -214,6 +245,7 @@ def _make_validate_sql_tool(dialects: list[str] | None):
               - ``error``: error message string (empty when valid)
               - ``sql_columns``: list of column IDs referenced by the query
         """
+        sql = _strip_sql_fences(sql)
         try:
             # Schema loading skipped while query_validation is bypassed.
             # Re-enable alongside the validation body in query_validation.py:
@@ -255,10 +287,11 @@ def _make_execute_sql_tool(db_connector: Any):
         """Execute a validated SQL query and return the results.
 
         Call this AFTER validate_sql confirms the query is valid.
-        Pass ONLY plain SQL — no markdown fences or backticks.
 
         Args:
-            sql: The SQL to execute (DuckDB dialect, plain text).
+            sql: The SQL to execute (DuckDB dialect).  May be wrapped in
+                triple-backtick markdown fences (``\\`\\`\\`sql ... \\`\\`\\``);
+                fences are stripped automatically before execution.
 
         Returns:
             JSON object with:
@@ -266,6 +299,7 @@ def _make_execute_sql_tool(db_connector: Any):
               - ``result``: list of row dicts (JSON-serialisable) or null
               - ``error``: error message string (empty on success)
         """
+        sql = _strip_sql_fences(sql)
         if db_connector is None:
             return json.dumps({"success": False, "result": None, "error": "No db_connector provided in payload."})
         try:
@@ -324,4 +358,4 @@ def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
     ]
 
 
-__all__ = ["build_omni_lite_tools"]
+__all__ = ["build_omni_lite_tools", "_strip_sql_fences"]
