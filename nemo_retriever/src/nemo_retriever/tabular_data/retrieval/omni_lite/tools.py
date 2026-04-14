@@ -326,7 +326,9 @@ def _make_execute_sql_tool(db_connector: Any, store: ExecutionStore):
               - ``result``: list of row dicts (JSON-serialisable) or null
               - ``error``: error message string (empty on success)
         """
-        sql = _strip_sql_fences(sql)
+        # Prefer the validated SQL captured by validate_sql; the agent-supplied
+        # argument may be truncated due to context overflow.
+        sql = store.sql or _strip_sql_fences(sql)
         if db_connector is None:
             return json.dumps({"success": False, "result": None, "error": "No db_connector provided in payload."})
         try:

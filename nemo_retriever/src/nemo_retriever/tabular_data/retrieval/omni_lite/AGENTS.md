@@ -93,17 +93,39 @@ SQL and retry validation + execution.
 
 ## SQL Generation Rules
 
+### ⚠ MANDATORY — Fully-Qualified Identifiers and Aliases
+
+**Every table MUST be written as `SCHEMA.TABLE AS alias` and every column MUST be written as `alias.column`.  No exceptions.**
+
+```
+-- WRONG (will be rejected):
+SELECT StudCity FROM Students WHERE StudCity = 'Seattle'
+
+-- CORRECT:
+SELECT s.StudCity FROM school_scheduling.Students AS s WHERE s.StudCity = 'Seattle'
+```
+
+- Never reference a table without its schema prefix: `Students` → `school_scheduling.Students AS s`
+- Never reference a column without its table alias: `StudCity` → `s.StudCity`
+- Every table in FROM / JOIN must have a unique alias assigned with `AS`.
+- Every column in SELECT / WHERE / GROUP BY / ORDER BY / HAVING must be prefixed with that alias.
+
+Violating this rule is a **hard error**.  Fix it before calling `validate_sql`.
+
+---
+
+### Additional Rules
+
 - **Use ONLY columns and tables explicitly listed** in the retrieved context.  Never hallucinate schemas, tables, or columns.
 - **Allowed dialects** are injected in the system prompt.  Write SQL for those dialects only.
 - **NEVER use**: `::` casts, `FILTER (WHERE ...)`, `QUALIFY`, `DISTINCT ON`, `GROUP BY ALL`, PostgreSQL-only syntax.
-- **Alias verification (MOST CRITICAL)**: Every alias referenced in SELECT / WHERE / GROUP BY / ORDER BY MUST be defined in FROM / JOIN.  Check before outputting.
+- **Alias verification**: Every alias referenced in SELECT / WHERE / GROUP BY / ORDER BY MUST be defined in FROM / JOIN.  Check before outputting.
 - **Column existence**: Verify each column exists in the table it is referenced from.
 - **Time windows**: interpret "last week/month/year" as the most recent **completed** calendar period.  Do NOT use rolling windows (e.g., `DATEADD(day,-7,CURRENT_DATE)`).  Do NOT include partial current periods.
 - **Single connection**: choose ONE connection whose tables answer the question.  Never JOIN across different connections.
 - **Case-sensitive literals**: never change the capitalisation of user-provided values.
 - **ORDER BY**: reference only aggregated fields (by alias) or columns present in SELECT / GROUP BY.
 - Do NOT include comments in the SQL output.
-- **Fully-qualified identifiers**: every table must be prefixed with its schema and assigned a unique alias (e.g., `SCHEMA.TABLE AS t`); every column reference must be explicitly qualified with that alias (e.g., `t.column`).  Unqualified table or column references are not permitted.
 - **String literals MUST use single quotes**: Double quotes are reserved for identifiers only (e.g., `"ColumnName"`).  Never use double quotes around string values.
 
 ---

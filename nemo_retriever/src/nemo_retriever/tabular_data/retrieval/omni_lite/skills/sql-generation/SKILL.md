@@ -59,11 +59,14 @@ Use this path when `complex_candidates_str` or `table_groups` contain useful con
 - Case-sensitive literals: never alter the capitalisation of user-supplied values.
 - `ORDER BY` may only reference selected aliases or GROUP BY columns.
 
-### 4. Mandatory pre-output alias check
+### 4. Mandatory pre-output checklist
 
-1. List every alias referenced in SELECT / WHERE / GROUP BY / ORDER BY / HAVING.
-2. List every alias defined in FROM / JOIN.
-3. Every referenced alias MUST appear in the defined list.  Fix any mismatch before outputting.
+Before calling `validate_sql`, verify ALL of the following — fix any violation first:
+
+1. **Schema prefix**: every table is written as `SCHEMA.TABLE AS alias` — never bare `TABLE`.
+2. **Column qualification**: every column is written as `alias.column` — never bare `column`.
+3. **Alias coverage**: every alias used in SELECT / WHERE / GROUP BY / ORDER BY / HAVING is defined in FROM / JOIN.
+4. No unqualified table or column reference exists anywhere in the query.
 
 ---
 
