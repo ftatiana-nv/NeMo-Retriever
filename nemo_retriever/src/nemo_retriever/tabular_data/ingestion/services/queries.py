@@ -115,15 +115,15 @@ def parse_queries_df(
         try:
             sql_id = str(uuid.uuid4())
             sql_text = row["query_text"]
-            q_timestamp = row["end_time"]
-            q_count = row["count"] if "count" in row else 1
-            q_count = int(q_count) if isinstance(q_count, str) else q_count
+            sql_timestamp = row["end_time"]
+            sql_count = row["count"] if "count" in row else 1
+            sql_count = int(sql_count) if isinstance(sql_count, str) else sql_count
             query_obj = Query(
                 schemas=schemas,
                 id=sql_id,
                 sql_text=sql_text,
-                ltimestamp=q_timestamp,
-                count=q_count,
+                ltimestamp=sql_timestamp,
+                count=sql_count,
                 dialect=dialect,
             )
             is_parsed = parse_query_slim(
