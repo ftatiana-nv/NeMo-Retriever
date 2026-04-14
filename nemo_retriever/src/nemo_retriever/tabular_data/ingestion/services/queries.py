@@ -42,11 +42,8 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
         return False
 
     for table_key, match in table_matches.items():
-        # table_key may be "schema.table" or just "table"; bare name is always the last part.
         bare_name = table_key.split(".")[-1]
 
-        # Use the schema identified by the extractor directly; fall back to scanning
-        # all schemas when the owning schema could not be determined.
         schema = schemas.get(match.schema_name) if match.schema_name else None
         if schema is None:
             for s in schemas.values():
@@ -109,9 +106,6 @@ def parse_queries_df(
     queries_df: pd.DataFrame,
     schemas: dict,
 ) -> list[dict[str, str]]:
-    # parsed_queries is mutated in-place (rather than returned) so that each
-    # newly parsed query can be cross-checked against the queries already
-    # parsed in this run before being compared with what is stored in the graph.
     failed_queries: list[dict[str, str]] = []
     for _, row in queries_df.iterrows():
         try:
