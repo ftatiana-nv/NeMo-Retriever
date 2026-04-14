@@ -43,6 +43,35 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Execution store
+# ---------------------------------------------------------------------------
+
+
+class ExecutionStore:
+    """Mutable per-request store written by the tools, read by the caller.
+
+    ``validate_sql`` writes the last SQL that passed validation.
+    ``execute_sql`` writes the last successful query result.
+    Both are ``None`` until the respective tool succeeds.
+    """
+
+    def __init__(self) -> None:
+        self.sql: str | None = None
+        self.result: list | None = None
+
+    def as_answer(self) -> dict | None:
+        """Return a structured answer dict if execution succeeded, else ``None``."""
+        if self.result is None:
+            return None
+        return {
+            "sql_code": self.sql or "",
+            "answer": "",
+            "result": self.result,
+            "semantic_elements": [],
+        }
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -220,8 +249,8 @@ def _make_retrieve_candidates_tool():
 # ---------------------------------------------------------------------------
 
 
-def _make_validate_sql_tool(dialects: list[str] | None):
-    """Return a ``validate_sql`` tool bound to *dialects*."""
+def _make_validate_sql_tool(dialects: list[str] | None, store: ExecutionStore):
+    """Return a ``validate_sql`` tool bound to *dialects* and *store*."""
 
     _dialects = dialects or []
 
@@ -257,6 +286,7 @@ def _make_validate_sql_tool(dialects: list[str] | None):
                         "sql_columns": [],
                     }
                 )
+            store.sql = sql
             return json.dumps(
                 {
                     "valid": True,
@@ -276,8 +306,8 @@ def _make_validate_sql_tool(dialects: list[str] | None):
 # ---------------------------------------------------------------------------
 
 
-def _make_execute_sql_tool(db_connector: Any):
-    """Return an ``execute_sql`` tool bound to *db_connector*."""
+def _make_execute_sql_tool(db_connector: Any, store: ExecutionStore):
+    """Return an ``execute_sql`` tool bound to *db_connector* and *store*."""
 
     @tool
     def execute_sql(sql: str) -> str:
@@ -302,6 +332,7 @@ def _make_execute_sql_tool(db_connector: Any):
         try:
             df = db_connector.execute(sql)
             result_data = df.to_dict(orient="records") if df is not None and not df.empty else []
+            store.result = result_data
             return json.dumps({"success": True, "result": result_data, "error": ""}, default=str)
         except Exception as exc:
             logger.warning("execute_sql failed: %s", exc)
@@ -315,8 +346,8 @@ def _make_execute_sql_tool(db_connector: Any):
 # ---------------------------------------------------------------------------
 
 
-def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
-    """Build and return the list of LangChain tools for the OmniLite Deep Agent.
+def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> tuple[list, ExecutionStore]:
+    """Build and return the list of LangChain tools and a shared ``ExecutionStore``.
 
     Session-scoped values (``db_connector``, ``dialects``) are closed over so
     the tools don't require extra arguments at call time.  Neither
@@ -330,18 +361,22 @@ def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> list:
             itself, not by the retrieval tools.
 
     Returns:
-        List of four bound LangChain tools in recommended call order:
-        ``[extract_entities, retrieve_semantic_candidates, validate_sql, execute_sql]``
+        A tuple of:
+        - List of four bound LangChain tools in recommended call order:
+          ``[extract_entities, retrieve_semantic_candidates, validate_sql, execute_sql]``
+        - ``ExecutionStore`` instance populated by ``validate_sql`` (SQL) and
+          ``execute_sql`` (result) as the agent runs.
     """
     db_connector = payload.get("db_connector")
     dialects = payload.get("dialects") or []
+    store = ExecutionStore()
 
     return [
         _make_extract_entities_tool(),
         _make_retrieve_candidates_tool(),
-        _make_validate_sql_tool(dialects),
-        _make_execute_sql_tool(db_connector),
-    ]
+        _make_validate_sql_tool(dialects, store),
+        _make_execute_sql_tool(db_connector, store),
+    ], store
 
 
-__all__ = ["build_omni_lite_tools", "_strip_sql_fences"]
+__all__ = ["build_omni_lite_tools", "ExecutionStore", "_strip_sql_fences"]

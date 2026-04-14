@@ -31,7 +31,7 @@ from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.tools import build_omni_lite_tools
+from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore, build_omni_lite_tools
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ _REQUIRED_ANSWER_KEYS = frozenset({"sql_code", "answer", "result"})
 # ---------------------------------------------------------------------------
 
 
-def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any:
+def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> tuple[Any, ExecutionStore]:
     """Create a Deep Agent for OmniLite Text-to-SQL.
 
     The agent is equipped with:
@@ -65,12 +65,16 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any
             called automatically.
 
     Returns:
-        A Deep Agent instance ready for ``agent.invoke()``.
+        Tuple of (agent, store):
+        - agent: Deep Agent instance ready for ``agent.invoke()``.
+        - store: ``ExecutionStore`` that is populated in-place as the agent
+          runs — ``store.sql`` holds the last validated SQL and
+          ``store.result`` holds the last successful query result.
     """
     if llm is None:
         llm = _make_llm()
 
-    tools = build_omni_lite_tools(payload, llm)
+    tools, store = build_omni_lite_tools(payload, llm)
 
     skill_dirs = _load_skill_dirs()
     agents_md = str(_BASE_DIR / "AGENTS.md")
@@ -94,7 +98,7 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> Any
         subagents=[],
         backend=FilesystemBackend(root_dir=str(_BASE_DIR)),
     )
-    return agent
+    return agent, store
 
 
 def _load_skill_dirs() -> list[str]:

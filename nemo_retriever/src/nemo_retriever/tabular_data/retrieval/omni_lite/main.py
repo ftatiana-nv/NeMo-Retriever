@@ -32,7 +32,7 @@ def get_agent_response(payload: AgentPayload):
         dict with keys ``sql_code``, ``answer``, ``result``,
         ``semantic_elements`` (and possibly others from the agent).
     """
-    agent = create_omni_lite_agent(payload, llm=llm_client)
+    agent, store = create_omni_lite_agent(payload, llm=llm_client)
 
     prompt = format_omni_lite_user_prompt(
         question=payload["question"],
@@ -46,9 +46,17 @@ def get_agent_response(payload: AgentPayload):
     for attempt in range(1, max_retries + 1):
         try:
             result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+
+            # Primary: use the store populated directly by the tools
+            store_answer = store.as_answer()
+            if store_answer is not None:
+                logger.info("OmniLite Deep Agent store answer (attempt %d): %s", attempt, store_answer)
+                return store_answer
+
+            # Secondary: scan agent messages for a formatted final answer
             parsed = extract_structured_answer(result)
             if parsed is not None:
-                logger.info("OmniLite Deep Agent answer (attempt %d): %s", attempt, parsed)
+                logger.info("OmniLite Deep Agent parsed answer (attempt %d): %s", attempt, parsed)
                 return parsed
 
             # Fallback: return raw final message content

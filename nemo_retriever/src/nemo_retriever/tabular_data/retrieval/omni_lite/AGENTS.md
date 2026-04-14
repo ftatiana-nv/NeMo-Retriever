@@ -103,7 +103,8 @@ SQL and retry validation + execution.
 - **Case-sensitive literals**: never change the capitalisation of user-provided values.
 - **ORDER BY**: reference only aggregated fields (by alias) or columns present in SELECT / GROUP BY.
 - Do NOT include comments in the SQL output.
-- **String literals MUST use single quotes** (e.g., `WHERE city = 'Tel Aviv'`).  Double quotes are reserved for identifiers only (e.g., `"ColumnName"`).  Never use double quotes around string values.
+- **Fully-qualified identifiers**: every table must be prefixed with its schema and assigned a unique alias (e.g., `SCHEMA.TABLE AS t`); every column reference must be explicitly qualified with that alias (e.g., `t.column`).  Unqualified table or column references are not permitted.
+- **String literals MUST use single quotes**: Double quotes are reserved for identifiers only (e.g., `"ColumnName"`).  Never use double quotes around string values.
 
 ---
 
