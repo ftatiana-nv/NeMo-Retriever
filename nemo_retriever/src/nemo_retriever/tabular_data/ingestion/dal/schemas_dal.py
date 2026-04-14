@@ -13,7 +13,6 @@ from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Edges,
     Labels,
-    RelTypes,
 )
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 
@@ -188,8 +187,8 @@ def add_fks(fks_df, last_seen):
                MATCH (t2:{Labels.TABLE}{{
                    name: fkd.fk_table_name, schema_name: fkd.fk_schema_name,
                    db_name: fkd.fk_database_name
-               }})-[:{RelTypes.CONTAINS}]->(col2:{Labels.COLUMN}{{name: fkd.fk_column_name}})
-               MERGE (col1)-[:{RelTypes.FOREIGN_KEY} {{last_seen: $last_seen}}]->(col2)"""
+               }})-[:{Edges.CONTAINS}]->(col2:{Labels.COLUMN}{{name: fkd.fk_column_name}})
+               MERGE (col1)-[:{Edges.FOREIGN_KEY} {{last_seen: $last_seen}}]->(col2)"""
     get_neo4j_conn().query_write(
         query=query,
         parameters={
