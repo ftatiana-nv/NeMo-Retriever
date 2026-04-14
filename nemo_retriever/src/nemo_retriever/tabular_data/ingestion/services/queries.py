@@ -19,7 +19,7 @@ from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
 logger = logging.getLogger(__name__)
 
 
-def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> bool:
+def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dict) -> bool:
     """Parse a SQL query using sqlglot extraction.
 
     Identifies referenced tables and columns for all SQL statement types without
@@ -29,7 +29,7 @@ def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> b
     Returns True when at least one recognised table was found, False otherwise.
     """
     table_matches: dict[str, TableMatch] = extract_tables_and_columns(
-        sql=q,
+        sql=sql_text,
         dialect=dialect,
         all_schemas=schemas,
     )
@@ -107,24 +107,27 @@ def parse_queries_df(
     queries_df: pd.DataFrame,
     schemas: dict,
 ) -> list[dict[str, str]]:
+    # parsed_queries is mutated in-place (rather than returned) so that each
+    # newly parsed query can be cross-checked against the queries already
+    # parsed in this run before being compared with what is stored in the graph.
     failed_queries: list[dict[str, str]] = []
     for _, row in queries_df.iterrows():
         try:
             sql_id = str(uuid.uuid4())
-            q = row["query_text"]
+            sql_text = row["query_text"]
             q_timestamp = row["end_time"]
             q_count = row["count"] if "count" in row else 1
             q_count = int(q_count) if isinstance(q_count, str) else q_count
             query_obj = Query(
                 schemas=schemas,
                 id=sql_id,
-                sql_text=q,
+                sql_text=sql_text,
                 ltimestamp=q_timestamp,
                 count=q_count,
                 dialect=dialect,
             )
             is_parsed = parse_query_slim(
-                q=q,
+                sql_text=sql_text,
                 query_obj=query_obj,
                 dialect=dialect,
                 schemas=schemas,
