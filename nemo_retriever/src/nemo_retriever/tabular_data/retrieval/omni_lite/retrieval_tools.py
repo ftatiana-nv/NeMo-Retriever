@@ -81,8 +81,6 @@ class RetrievalStore:
             return "value"
         if entity_type == "time_filter":
             return "time_filter"
-        if result.get("covered_by_existing_table"):
-            return "column"
         candidates = result.get("candidates", [])
         if any(c.get("label") == Labels.CUSTOM_ANALYSIS for c in candidates):
             return "custom_analysis"
@@ -114,8 +112,8 @@ class RetrievalStore:
                     "candidates": r.get("candidates", []),
                     "sql_expression": r.get("sql_expression"),
                     "filter_field_hint": r.get("filter_field_hint"),
-                    "matched_table": r.get("matched_table"),
-                    "matched_column": r.get("matched_column"),
+                    "matched_table": None,
+                    "matched_column": None,
                 }
             )
 
@@ -192,49 +190,6 @@ class _ExpressionResult(BaseModel):
         ...,
         description="Fully-qualified column names used in the expression.",
     )
-    confidence: Literal["high", "medium", "low"] = Field(
-        ...,
-        description="Confidence that the expression correctly represents the entity.",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Intra-table coverage helper
-# ---------------------------------------------------------------------------
-
-
-def _find_entity_in_tables(
-    entity_term: str,
-    tables: list[dict],
-) -> tuple[bool, str | None, str | None]:
-    """Check whether *entity_term* is already satisfied by a column in *tables*.
-
-    Bidirectional substring match covers plurals, abbreviations, and partials
-    (e.g. "city" ↔ "studcity", "grade" ↔ "grade_level").
-
-    Returns:
-        ``(covered, matched_table_name, matched_column_name)``
-    """
-    term = entity_term.lower().strip()
-    if not term:
-        return False, None, None
-
-    for table in tables:
-        table_name = table.get("name") or ""
-        for col in table.get("columns") or []:
-            if isinstance(col, dict):
-                col_name = (col.get("name") or "").lower()
-                col_desc = (col.get("description") or "").lower()
-            elif isinstance(col, str):
-                col_name = col.lower()
-                col_desc = ""
-            else:
-                continue
-
-            if term in col_name or col_name in term or (col_desc and term in col_desc):
-                return True, table_name, col_name
-
-    return False, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -308,19 +263,13 @@ Order the entities list by priority ascending in your output."""
 
 
 def _make_retrieve_for_entity_tool(store: RetrievalStore):
-    """Return a ``retrieve_for_entity`` tool that reads/writes *store*.
-
-    The intra-table coverage check uses ``store.accumulated_tables`` so the
-    agent never needs to pass accumulated state as an argument.
-    """
+    """Return a ``retrieve_for_entity`` tool that reads/writes *store*."""
 
     @tool
     def retrieve_for_entity(entity_term: str, entity_type: str = "dimension") -> str:
         """Retrieve semantically relevant candidates for a single entity term.
 
         Call this ONCE for EACH entity returned by decompose_question, in priority order.
-        The tool automatically checks whether the entity is already covered by a
-        previously-retrieved table — no state arguments needed.
 
         Args:
             entity_term: The entity term to search for (e.g. "revenue", "city", "students").
@@ -328,37 +277,9 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                          ("metric", "dimension", "time_filter", or "value").
 
         Returns:
-            A short summary: covered/not-covered, tables found, whether search was skipped.
+            A short summary: covered/not-covered, tables found.
         """
-        # ── Intra-table coverage check ─────────────────────────────────────
-        covered_existing, matched_table, matched_col = _find_entity_in_tables(entity_term, store.accumulated_tables)
-        if covered_existing:
-            logger.info(
-                "retrieve_for_entity: '%s' already covered by %s.%s — skipping vector search",
-                entity_term,
-                matched_table,
-                matched_col,
-            )
-            store.entity_results.append(
-                {
-                    "entity": entity_term,
-                    "entity_type": entity_type,
-                    "candidates": [],
-                    "relevant_tables": [],
-                    "relevant_fks": [],
-                    "covered_by_existing_table": True,
-                    "matched_table": matched_table,
-                    "matched_column": matched_col,
-                    "sql_expression": None,
-                    "filter_field_hint": None,
-                }
-            )
-            return (
-                f"'{entity_term}' already covered by column '{matched_col}' "
-                f"in table '{matched_table}' — vector search skipped."
-            )
-
-        # ── Full vector/graph search ───────────────────────────────────────
+        # ── Vector/graph search ────────────────────────────────────────────
         try:
             custom_raw, column_raw = extract_candidates(
                 entities_and_concepts=[entity_term],
@@ -392,9 +313,6 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                     "candidates": custom_candidates,
                     "relevant_tables": relevant_tables,
                     "relevant_fks": relevant_fks,
-                    "covered_by_existing_table": False,
-                    "matched_table": None,
-                    "matched_column": None,
                     "sql_expression": None,
                     "filter_field_hint": None,
                 }
@@ -416,9 +334,6 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                     "candidates": [],
                     "relevant_tables": [],
                     "relevant_fks": [],
-                    "covered_by_existing_table": False,
-                    "matched_table": None,
-                    "matched_column": None,
                     "sql_expression": None,
                     "filter_field_hint": None,
                 }
@@ -442,8 +357,7 @@ def _make_synthesize_expression_tool(llm: Any, store: RetrievalStore):
     def synthesize_expression(entity_term: str) -> str:
         """Derive a SQL expression for an entity that has no direct candidate match.
 
-        Call this ONLY when retrieve_for_entity returned NOT COVERED for an entity
-        and covered_by_existing_table is false.
+        Call this ONLY when retrieve_for_entity returned NOT COVERED for an entity.
         Uses all columns accumulated in the store — no column list argument needed.
 
         Args:
@@ -481,9 +395,9 @@ Rules:
 1. Use ONLY column names from the list above.
 2. Output a SQL expression fragment (NOT a full SELECT statement).
 3. Common patterns: subtraction (income - cost = profit), ratio, SUM, COUNT, AVG.
-4. If you cannot express "{entity_term}" from these columns, set confidence to "low".
+4. If you cannot express "{entity_term}" from these columns, leave expression empty.
 
-Return a JSON object with keys: expression, columns_used, confidence."""
+Return a JSON object with keys: expression, columns_used."""
 
         messages = [SystemMessage(content=prompt)]
         result = invoke_with_structured_output(llm, messages, _ExpressionResult)
@@ -494,18 +408,12 @@ Return a JSON object with keys: expression, columns_used, confidence."""
 
         valid_col_set = {n.lower() for n in col_names}
         validated_cols = [c for c in result.columns_used if str(c).split(".")[-1].lower() in valid_col_set]
-        success = bool(result.expression and result.confidence in ("high", "medium"))
+        success = bool(result.expression)
         _patch_expression(store, entity_term, result.expression if success else "", success)
 
         if success:
-            return (
-                f"'{entity_term}' — expression synthesized: {result.expression} "
-                f"(confidence={result.confidence}, columns={validated_cols})"
-            )
-        return (
-            f"'{entity_term}' — synthesis low confidence ({result.confidence}): "
-            f"{result.expression or 'no expression produced'}"
-        )
+            return f"'{entity_term}' — expression synthesized: {result.expression} (columns={validated_cols})"
+        return f"'{entity_term}' — synthesis produced no expression."
 
     return synthesize_expression
 
@@ -524,9 +432,6 @@ def _patch_expression(store: RetrievalStore, entity_term: str, expression: str, 
             "candidates": [],
             "relevant_tables": [],
             "relevant_fks": [],
-            "covered_by_existing_table": False,
-            "matched_table": None,
-            "matched_column": None,
             "sql_expression": expression if success else None,
             "filter_field_hint": None,
         }
@@ -562,4 +467,4 @@ def build_retrieval_tools(payload: AgentPayload, llm: Any) -> tuple[list, Retrie
     ], store
 
 
-__all__ = ["build_retrieval_tools", "RetrievalStore", "_find_entity_in_tables"]
+__all__ = ["build_retrieval_tools", "RetrievalStore"]

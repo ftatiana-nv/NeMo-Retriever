@@ -50,7 +50,7 @@ previously-retrieved tables. If so, it skips the vector search and returns immed
 
 ### Step 3 — synthesize_expression (only if needed)
 For any entity returned as **NOT COVERED**: call `synthesize_expression(entity_term)`.
-The tool reads accumulated columns from the store automatically.
+The tool reads all accumulated columns from the store automatically — no arguments needed besides the entity term.
 If synthesis fails → entity will be marked `unresolved`.
 
 ### Step 4 — Done
