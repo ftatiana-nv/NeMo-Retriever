@@ -1,7 +1,7 @@
 """
 SQL Execution Agent
 
-Executes validated SQL via in-process DuckDB (``tabular-dev-tools/duckdb_connector.py``).
+Executes validated SQL via the injected DB connector.
 """
 
 import logging
@@ -13,9 +13,9 @@ from typing import Any, Dict
 
 from typing import Optional
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import is_infra_or_auth_error
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import is_infra_or_auth_error
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
 
 logger = logging.getLogger(__name__)
@@ -28,14 +28,14 @@ class QueryResponse:
         self.error = error
 
 
-def _run_sql_duckdb(sql: str, state: AgentState) -> QueryResponse:
-    """Use ``path_state['db_connector']`` (or legacy ``duckdb_connector``); else ``duckdb_path`` / env."""
-    connector = state.get("db_connector") or state.get("duckdb_connector")
+def _run_sql(sql: str, state: AgentState) -> QueryResponse:
+    """Execute SQL via the injected ``connector``."""
+    connector = state.get("connector")
     if connector is not None:
         try:
             df = connector.execute(sql)
         except Exception as e:
-            logger.exception("DuckDB execute failed (injected connector)")
+            logger.exception("SQL execution failed (injected connector)")
             return QueryResponse(result=None, sliced=False, error=str(e))
         payload = df.to_json(orient="records", default_handler=str) if len(df) else "[]"
         return QueryResponse(result=[payload], sliced=False, error=None)
@@ -44,13 +44,11 @@ def _run_sql_duckdb(sql: str, state: AgentState) -> QueryResponse:
 
 class SQLExecutionAgent(BaseAgent):
     """
-    Agent that executes SQL against DuckDB.
+    Agent that executes SQL.
 
     Input:
-    - ``path_state["sql_code"]`` (from validation) or ``llm_calc_response.sql_code``
-    - Optional ``path_state["db_connector"]``: injected DB connector (e.g. :class:`DuckDB`).
-    - Optional legacy ``path_state["duckdb_connector"]``: same as ``db_connector``.
-    - Optional ``path_state["duckdb_path"]``: path string when no connector is passed.
+    - ``path_state["sql_code"]`` (from validation) or ``sql_generation_result.sql_code``
+    - ``connector``: injected DB connector.
 
     Output:
     - ``path_state["sql_response_from_db"]``: :class:`QueryResponse`
@@ -63,7 +61,7 @@ class SQLExecutionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         sql_code = path_state.get("sql_code")
         if not sql_code or not str(sql_code).strip():
-            llm = path_state.get("llm_calc_response")
+            llm = path_state.get("sql_generation_result")
             sql_code = getattr(llm, "sql_code", None) if llm else None
         if not sql_code or not str(sql_code).strip():
             self.logger.warning("No SQL code found for execution")
@@ -74,10 +72,10 @@ class SQLExecutionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         sql_code = path_state.get("sql_code")
         if not sql_code or not str(sql_code).strip():
-            llm = path_state.get("llm_calc_response")
+            llm = path_state.get("sql_generation_result")
             sql_code = getattr(llm, "sql_code", "") if llm else ""
 
-        response_from_db = _run_sql_duckdb(sql_code, state)
+        response_from_db = _run_sql(sql_code, state)
 
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)

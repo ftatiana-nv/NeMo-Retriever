@@ -21,9 +21,9 @@ import logging
 from typing import Dict, Any
 
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import get_all_schemas_ids, get_schemas_slim, get_semantic_entities_ids
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_all_schemas_ids, get_schemas_slim, get_semantic_entities_ids
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class SQLValidationAgent(BaseAgent):
     common mistakes like self-comparisons, incorrect filters, etc.
 
     Input Requirements:
-    - path_state["llm_calc_response"]: SQL response to validate
+    - path_state["sql_generation_result"]: SQL response to validate
     - path_state["relevant_tables"]: Relevant tables used
 
     Output:
@@ -56,7 +56,7 @@ class SQLValidationAgent(BaseAgent):
         if state.get("decision") == "unconstructable":
             # Skip validation if SQL couldn't be constructed
             return False
-        if not path_state.get("llm_calc_response"):
+        if not path_state.get("sql_generation_result"):
             self.logger.warning("No SQL response found for validation")
             return False
         return True
@@ -78,9 +78,9 @@ class SQLValidationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
        
-        response = path_state.get("llm_calc_response")
+        response = path_state.get("sql_generation_result")
         relevant_tables = path_state.get("relevant_tables", [])
-        dialects = state["dialects"]
+        dialect = state.get("dialect", "")
 
 
     
@@ -89,7 +89,7 @@ class SQLValidationAgent(BaseAgent):
         # TODO, uncomment when parser is ready, fix
         schemas = get_schemas_slim(list(get_all_schemas_ids())) 
 
-        validation_result = self._sql_parse_validation(schemas, response.sql_code, dialects)
+        validation_result = self._sql_parse_validation(schemas, response.sql_code, dialect)
         
         if validation_result.get("error"):
             # SQL is invalid
@@ -126,12 +126,12 @@ class SQLValidationAgent(BaseAgent):
         }
 
     @staticmethod
-    def _sql_parse_validation(schemas, sql: str, dialects: list) -> dict:
+    def _sql_parse_validation(schemas, sql: str, dialect: str) -> dict:
         result: dict = {}
         try:
             query = parse_query_single(
                 sql=sql,
-                dialect=dialects[0],
+                dialect=dialect,
                 schemas=schemas,
             )
             result["success"] = True

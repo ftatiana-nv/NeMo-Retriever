@@ -12,14 +12,14 @@ Responsibilities:
 import logging
 from typing import Dict, Any
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     Labels,
     clean_results,
     extract_candidates,

@@ -7,8 +7,8 @@ This agent generates a response when SQL cannot be constructed from available da
 import logging
 from typing import Dict, Any
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
 
 logger = logging.getLogger(__name__)

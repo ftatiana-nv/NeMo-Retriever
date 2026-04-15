@@ -4,7 +4,7 @@
 
 from typing import List
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import Labels
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import Labels
 import pandas as pd
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn

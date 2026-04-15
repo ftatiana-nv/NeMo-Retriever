@@ -2,7 +2,7 @@ main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
     "Ontology: {ontology_prompt}\n\n"
-    "dialects: {dialects}"
+    "SQL dialect: {dialect}"
 )
 
 ONTOLOGY = {
@@ -36,7 +36,7 @@ create_sql_user_prompt = (
     "You are an expert SQL query builder.\n"
     "Your task is to construct a SQL query that answers the user's question based on the provided semantic entities (if present), tables and foreign keys(if present).\n"
     "NEVER EVER MAKE UP SCHEMAS OR TABLES OR COLUMNS THAT ARE NOT PROVIDED IN THE PROMPT.\n"
-    "Allowed SQL dialects: {dialects}.\n"
+    "Allowed SQL dialect: {dialect}.\n"
     "Question from user: {main_question}\n"
     "{observation_block}\n"
     "Construct SQL based ONLY on these semantic entities (if present), tables and their explicitly listed columns:\n\n{tables}\n\n"
@@ -51,7 +51,7 @@ create_sql_user_prompt = (
     "Previous conversations ordered by similarity to the user's question and most recent first:\n"
     "{qa_from_conversations}.\n"
     "Instructions:\n"
-    "- CRITICAL: Construct a SQL query that is syntactically and semantically valid for the specified SQL dialect: {dialects}.\n"
+    "- CRITICAL: Construct a SQL query that is syntactically and semantically valid for the specified SQL dialect: {dialect}.\n"
     "- MOST CRITICAL: ALWAYS VERIFY COLUMN EXISTENCE AND DATA TYPE IN THE RELEVANT TABLE BEFORE USING THEM IN THE SQL QUERY! BE CAREFUL TO AVOID CROSS-TABLE COLUMN CONFUSION.\n"
     "- MOST CRITICAL: Always use joins from the foreign keys provided in the prompt although it is not the shortest path, NEVER create new joins!\n"
     "- CRITICAL: EVERY TABLE ALIAS USED IN SELECT, WHERE, GROUP BY, ORDER BY, OR HAVING CLAUSES MUST BE DEFINED IN THE FROM OR JOIN CLAUSES. Never reference an undefined alias.\n"

@@ -20,12 +20,13 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage, SystemMessage
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_from_semantic import format_tables_for_prompt
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState, get_question_for_processing
-from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import create_sql_general_prompt, create_sql_user_prompt
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import get_relevant_tables
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
+from nemo_retriever.tabular_data.retrieval.text_to_sql.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.models import SQLGenerationModel
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState, get_question_for_processing
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import create_sql_general_prompt, create_sql_user_prompt
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_relevant_tables
 
 
 
@@ -43,10 +44,10 @@ class SQLFromTablesAgent(BaseAgent):
     - path_state["relevant_tables"]: Optional relevant tables (if not provided, will search)
     - path_state["error"]: Optional error from previous attempt (for reconstruction)
     - state["initial_question"]: User's question
-    - state["dialects"]: SQL dialects to support
+    - state["dialect"]: SQL dialect
 
     Output:
-    - path_state["llm_calc_response"]: SQL response with SQL code
+    - path_state["sql_generation_result"]: SQL response with SQL code
     - path_state["relevant_tables"]: Relevant tables used
     - decision: "constructable" or "unconstructable"
     """
@@ -72,11 +73,8 @@ class SQLFromTablesAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         llm = state["llm"]
-        dialects = state["dialects"]
+        dialect = state["dialect"]
         question = get_question_for_processing(state)
-        account_id = state["account_id"]
-        user_participants = state["user_participants"]
-        user_id = user_participants[0] if user_participants else None
 
         system_prompt = create_sql_general_prompt
 
@@ -84,20 +82,15 @@ class SQLFromTablesAgent(BaseAgent):
         relevant_tables = path_state.get("relevant_tables", [])
         if not relevant_tables:
             relevant_tables, _ = get_relevant_tables(
-                account_id, user_participants, question
+                question
             )
 
         # Find similar questions from conversation history
         similar_questions = []
-        # embeddings_client = get_embeddings(account_id, is_embeddings=True)
-        # if embeddings_client and user_id:
-        #     similar_questions = find_similar_questions(
-        #         embeddings_client.embed_query(question), user_id
-        #     )
 
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
-            dialects=dialects,
+            dialect=dialect,
             main_question=question,
             observation_block="",
             fks=[],  # Foreign keys can be added if needed
@@ -106,41 +99,33 @@ class SQLFromTablesAgent(BaseAgent):
             qa_from_conversations=similar_questions,
         )
 
-        # Add error context if this is a reconstruction attempt
-        # Note: Error handling for reconstruction is in SQLReconstructionAgent
-        # This agent is for initial generation from tables, not reconstruction
-
-        # Build messages and invoke LLM
         messages = state["messages"] + [
             SystemMessage(content=system_prompt),
             AIMessage(content=user_prompt),
         ]
 
-        response = invoke_with_structured_output(llm, messages, CalcFinalResponseModel)
+        response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 
         self.logger.info(
-            f"SQL generated from tables: {response.sql_code[:100] if response.sql_code else 'None'}..."
+            "SQL generated from tables: %s...",
+            response.sql_code[:100] if response and response.sql_code else "None",
         )
-        self.logger.info(f"Response thought: {response.thought}")
 
-        if response.sql_code:
-            # SQL was successfully generated
+        if response and response.sql_code:
             return {
                 "messages": messages + [AIMessage(content=response.response)],
                 "path_state": {
                     **path_state,
-                    "llm_calc_response": response,
+                    "sql_generation_result": response,
                     "relevant_tables": relevant_tables,
-                    "connection": response.connection,
                 },
                 "decision": "constructable",
             }
         else:
-            # SQL could not be generated
             return {
                 "path_state": {
                     **path_state,
-                    "unconstructable_explanation": response.response,
+                    "unconstructable_explanation": getattr(response, "response", "LLM failed to produce SQL."),
                 },
                 "decision": "unconstructable",
             }

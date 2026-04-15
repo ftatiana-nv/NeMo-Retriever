@@ -19,8 +19,8 @@ class AgentPayload(TypedDict):
     question: str
     history: list[dict[str, str]]
     path_state: NotRequired[dict]
-    dialects: NotRequired[list[str]]
-    db_connector: NotRequired[Any]
+    dialect: NotRequired[str]
+    connector: NotRequired[Any]
 
 
 class AgentState(TypedDict):
@@ -30,8 +30,8 @@ class AgentState(TypedDict):
     initial_question: str
     messages: list[HumanMessage]
     decision: str
-    dialects: list[str]
-    db_connector: Any
+    dialect: str
+    connector: Any
     path_state: dict
 
 

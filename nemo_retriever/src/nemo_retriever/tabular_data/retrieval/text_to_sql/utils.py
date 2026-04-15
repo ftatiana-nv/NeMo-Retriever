@@ -384,7 +384,7 @@ def search_lancedb_semantic_index(
     label_filter: list[str] | None = None,
 ) -> list[dict]:
     """
-    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override.OmniLiteRetriever`
+    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override.OmniLiteRetriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
     ``OmniLiteRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
@@ -400,7 +400,7 @@ def search_lancedb_semantic_index(
     ``https://integrate.api.nvidia.com/v1``, and ``NVIDIA_API_KEY`` for the hosted API.
     Optional: ``OMNI_SEMANTIC_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
     """
-    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
+    from nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override import OmniLiteRetriever
 
     uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
     table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")

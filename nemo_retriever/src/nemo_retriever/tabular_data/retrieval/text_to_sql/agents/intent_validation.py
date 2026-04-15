@@ -20,13 +20,13 @@ Design Decisions:
 
 import logging
 from typing import Dict, Any
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
@@ -69,7 +69,7 @@ class IntentValidationAgent(BaseAgent):
     are correct.
 
     Input Requirements:
-    - path_state["llm_calc_response"]: SQL response to validate
+    - path_state["sql_generation_result"]: SQL response to validate
     - path_state["action_input"]["required_entity_name"]: Required entities from action input
     - state["initial_question"]: User's question
     - state["llm"]: LLM instance
@@ -96,7 +96,7 @@ class IntentValidationAgent(BaseAgent):
             self.logger.info("Skipping intent validation - SQL unconstructable")
             return False
 
-        if not path_state.get("llm_calc_response"):
+        if not path_state.get("sql_generation_result"):
             self.logger.warning("No SQL response found for intent validation")
             return False
 
@@ -128,7 +128,7 @@ class IntentValidationAgent(BaseAgent):
         llm = state["llm"]
 
         # Get SQL response
-        response = path_state.get("llm_calc_response")
+        response = path_state.get("sql_generation_result")
         sql_code = response.sql_code if hasattr(response, "sql_code") else ""
 
         if not sql_code or not sql_code.strip():

@@ -16,7 +16,7 @@ Design Principles:
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,6 @@ class BaseAgent(ABC):
             exc_info=True,
             extra={
                 "agent_name": self.agent_name,
-                "account_id": state.get("account_id"),
             },
         )
 
@@ -120,21 +119,18 @@ class BaseAgent(ABC):
 
     def log_execution_start(self, state: AgentState) -> None:
         """Log the start of agent execution."""
-        account_id = state.get("account_id", "unknown")
         self.logger.info(
             f"Executing agent: {self.agent_name}",
-            extra={"agent_name": self.agent_name, "account_id": account_id},
+            extra={"agent_name": self.agent_name},
         )
 
     def log_execution_end(self, state: AgentState, result: Dict[str, Any]) -> None:
         """Log the end of agent execution."""
-        account_id = state.get("account_id", "unknown")
         decision = result.get("decision", "none")
         self.logger.info(
             f"Agent completed: {self.agent_name} -> {decision}",
             extra={
                 "agent_name": self.agent_name,
-                "account_id": account_id,
                 "decision": decision,
             },
         )

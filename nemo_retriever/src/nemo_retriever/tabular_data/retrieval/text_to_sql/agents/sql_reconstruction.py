@@ -21,14 +21,14 @@ import logging
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage, SystemMessage
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.models import SQLGenerationModel
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import get_semantic_entities_ids
+from nemo_retriever.tabular_data.retrieval.text_to_sql.models import SQLGenerationModel
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_semantic_entities_ids
 
 
 
@@ -44,12 +44,12 @@ class SQLReconstructionAgent(BaseAgent):
 
     Input Requirements:
     - path_state["error"]: Error message from validation
-    - path_state["llm_calc_response"]: Previous (incorrect) SQL response
+    - path_state["sql_generation_result"]: Previous (incorrect) SQL response
     - path_state["candidates"]: Relevant candidates for context
     - state["initial_question"]: Original user question
 
     Output:
-    - path_state["llm_calc_response"]: Reconstructed SQL response
+    - path_state["sql_generation_result"]: Reconstructed SQL response
     - path_state["relevant_tables"]: Relevant tables
     - path_state["semantic_elements"]: Semantic entity IDs used
     - messages: Updated messages with reconstruction
@@ -64,7 +64,7 @@ class SQLReconstructionAgent(BaseAgent):
         if not path_state.get("error"):
             self.logger.warning("No error found for SQL reconstruction")
             return False
-        if not path_state.get("llm_calc_response"):
+        if not path_state.get("sql_generation_result"):
             self.logger.warning("No previous SQL response found for reconstruction")
             return False
         return True
@@ -88,7 +88,7 @@ class SQLReconstructionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         llm = state["llm"]
         error = path_state.get("error", "")
-        incorrect_response = path_state.get("llm_calc_response")
+        incorrect_response = path_state.get("sql_generation_result")
         question = get_question_for_processing(state)
 
         # Build messages list starting from state messages
@@ -109,7 +109,7 @@ class SQLReconstructionAgent(BaseAgent):
         # Add specific guidance for unknown column errors (likely wrong schema)
         if "unknown column name" in error.lower() and "in table" in error.lower():
             error_prompt += (
-                "\n⚠️ RECONSTRUCTION HINT: The 'Unknown column name in table' error typically indicates "
+                "\nRECONSTRUCTION HINT: The 'Unknown column name in table' error typically indicates "
                 "that you're using the correct table name but referencing it from the wrong schema. "
                 "Look for the same table name in a different schema from the additional tables provided above. "
                 "The column you're looking for likely exists in the same table name under a different schema.\n\n"
@@ -162,7 +162,7 @@ class SQLReconstructionAgent(BaseAgent):
             "messages": messages,
             "path_state": {
                 **path_state,
-                "llm_calc_response": response,
+                "sql_generation_result": response,
                 "relevant_tables": all_tables
                 if all_tables is not None
                 else path_state.get("relevant_tables", []),

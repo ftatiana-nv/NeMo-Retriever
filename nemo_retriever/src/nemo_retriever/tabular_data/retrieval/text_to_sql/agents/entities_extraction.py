@@ -10,13 +10,13 @@ from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import create_entity_extraction_prompt
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import create_entity_extraction_prompt
 
 logger = logging.getLogger(__name__)
 

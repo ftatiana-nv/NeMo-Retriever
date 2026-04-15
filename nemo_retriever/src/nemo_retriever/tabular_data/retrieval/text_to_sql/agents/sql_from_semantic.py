@@ -24,24 +24,24 @@ from typing import Dict, Any, Optional
 from langchain_core.messages import AIMessage, SystemMessage
 
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import safe_invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.ai_services import safe_invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     build_semantic_items_section,
     get_semantic_entities_ids,
 )
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
     create_sql_from_semantic_prompt,
     create_sql_user_prompt,
 )
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.models import SQLGenerationModel
+from nemo_retriever.tabular_data.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class SQLFromSemanticAgent(BaseAgent):
     - path_state["relevant_queries"]: Relevant queries (from CandidatePreparationAgent)
 
     Output:
-    - path_state["llm_calc_response"]: SQL response with SQL code or text answer
+    - path_state["sql_generation_result"]: SQL response with SQL code or text answer
     - path_state["relevant_tables"]: Relevant tables used
     - path_state["semantic_elements"]: Semantic entity IDs used
     - decision: "constructable" or "unconstructable"
@@ -173,7 +173,7 @@ class SQLFromSemanticAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         llm = state["llm"]
-        dialects = state["dialects"]
+        dialect = state["dialect"]
         question = get_question_for_processing(state)
         # candidates = path_state["retrieved_candidates"]
 
@@ -207,7 +207,7 @@ class SQLFromSemanticAgent(BaseAgent):
 
             # Build user prompt with formatted tables
             user_prompt = create_sql_user_prompt.format(
-                dialects=dialects,
+                dialect=dialect,
                 main_question=question,
                 observation_block=observation_block,
                 fks=[
@@ -312,7 +312,7 @@ class SQLFromSemanticAgent(BaseAgent):
                 "messages": messages,  # Don't add formatted response here - formatting agent will do it
                 "path_state": {
                     **path_state,
-                    "llm_calc_response": response,  # Keep as object (Pydantic model)
+                    "sql_generation_result": response,  # Keep as object (Pydantic model)
                     "relevant_tables": relevant_tables if has_sql else [],
                     "semantic_elements": semantic_elements,
                 },
@@ -332,7 +332,7 @@ class SQLFromSemanticAgent(BaseAgent):
                 "messages": messages + [AIMessage(content=response.response)],
                 "path_state": {
                     **path_state,
-                    "llm_calc_response": response,
+                    "sql_generation_result": response,
                     "relevant_tables": relevant_tables if has_sql else [],
                     "semantic_elements": semantic_elements,
                 },

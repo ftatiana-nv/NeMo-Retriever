@@ -22,12 +22,12 @@ from typing import Dict, Any
 
 import networkx as nx
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     Labels,
     _apply_foreign_key_hints,
     dedupe_merge_relevant_tables,
@@ -161,39 +161,25 @@ class CandidatePreparationAgent(BaseAgent):
         """
         complex_candidates = []
         for x in candidates:
-            if (
-                x.get("complex_attribute", False)
-                or x.get("label") == Labels.CUSTOM_ANALYSIS
-                or x.get("certified", "pending") == "certified"
-                or len(x.get("documents", [])) > 0
-            ):
+            if x.get("label") == Labels.CUSTOM_ANALYSIS:
                 complex_candidates.append(x)
 
-        # Sort to prioritize certified candidates
-        # Certified candidates come first, then others sorted by score
+        
         def sort_key(candidate):
-            is_certified = candidate.get("certified", "pending") == "certified"
-            score = candidate.get("score", 0)
-            # Return tuple: (not_certified, -score) so certified=True sorts first
-            # Then by score descending
-            return (not is_certified, -score)
+            return -candidate.get("score", 0)
 
         complex_candidates.sort(key=sort_key)
 
         complex_candidates_str = []
         for x in complex_candidates:
-            is_certified = x.get("certified", "pending") == "certified"
-            certified_marker = " [CERTIFIED]" if is_certified else ""
-
             preview = self._get_cleaned_sql(x)
             if preview:
                 complex_candidates_str.append(
-                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}{certified_marker}, sql_snippet: {preview}"
+                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}, sql_snippet: {preview}"
                 )
             else:
-                # No SQL preview available; still include basic metadata
                 complex_candidates_str.append(
-                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}{certified_marker}"
+                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}"
                 )
         return complex_candidates_str
 
@@ -214,8 +200,6 @@ class CandidatePreparationAgent(BaseAgent):
         if isinstance(sql_entries, list) and sql_entries:
             raw = (
                 sql_entries[0].get("sql_code")
-                or sql_entries[0].get("snippet")
-                or sql_entries[0].get("sql_snippet")
                 or ""
             )
             if not isinstance(raw, str):

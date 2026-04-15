@@ -26,21 +26,6 @@ def safe_invoke_with_structured_output(
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            # if use_custom_parser:
-            #     llm_with_tools = llm.bind_tools([schema], tool_choice="any")
-            #     raw_response = llm_with_tools.invoke(current_messages)
-            #     parser = FallbackJsonParser(
-            #         tools=[cast(TypeBaseModel, schema)], first_tool_only=True
-            #     )
-            #     result = parser.parse_result([ChatGeneration(message=raw_response)])
-            #     if result is None:
-            #         raise ValueError(
-            #             "Parser returned None - could not extract structured output"
-            #         )
-
-            #     return result
-
-            # standard LangChain structured output
             model_llm = llm.with_structured_output(schema, method=method)
             result = model_llm.invoke(current_messages)
             return result
@@ -59,13 +44,13 @@ def safe_invoke_with_structured_output(
                 )
             else:
                 logger.error(
-                    f"❌ Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}"
+                    f"Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}"
                 )
                 raise  # If still failing after max tries, raise
 
         except Exception as e:
             logger.error(
-                f"❌ Unexpected error on attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} for {schema_name}: "
+                f"Unexpected error on attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} for {schema_name}: "
                 f"{type(e).__name__}: {e}",
                 exc_info=True,
             )
@@ -84,7 +69,7 @@ def invoke_with_structured_output(
         return safe_invoke_with_structured_output(llm, messages, schema, method)
     except Exception as e:
         logger.error(
-            f"❌ invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "
+            f"invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "
             f"{type(e).__name__}: {e}",
             exc_info=True,
         )

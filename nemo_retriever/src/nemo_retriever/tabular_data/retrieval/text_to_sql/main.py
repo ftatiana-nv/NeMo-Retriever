@@ -1,16 +1,12 @@
 import logging
-import os
-import subprocess
 from datetime import datetime
-from pathlib import Path
 
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.runnables.graph import MermaidDrawMethod
-from nemo_retriever.tabular_data.retrieval.omni_lite.graph import create_graph
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload, AgentState
-from nemo_retriever.tabular_data.retrieval.omni_lite.prompts import main_system_prompt_template, ONTOLOGY, get_ontology_prompt
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
+from nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph import create_graph
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload, AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import main_system_prompt_template, ONTOLOGY, get_ontology_prompt
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import _make_llm
 
 logger = logging.getLogger(__name__)
 
@@ -23,68 +19,13 @@ except ValueError as e:
 graph = create_graph()
 app = graph.compile()
 
-# Graph PNG next to this module (omni_lite/omni_agent_graph.png)
-_OMNI_LITE_DIR = Path(__file__).resolve().parent
-graph_image_path = str(_OMNI_LITE_DIR / "omni_agent_graph.png")
-Path(os.path.dirname(graph_image_path)).mkdir(parents=True, exist_ok=True)
-
-
-def render_with_mmdc(out_path: str, mermaid_text: str) -> None:
-    import pathlib
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mmd") as tmp:
-        pathlib.Path(tmp.name).write_text(mermaid_text, encoding="utf-8")
-        subprocess.run(
-            [
-                "mmdc",
-                "-i",
-                tmp.name,
-                "-o",
-                out_path,
-                "-s",
-                "4",
-                "-w",
-                "3200",
-                "-H",
-                "2400",
-            ],
-            check=True,
-        )
-
-
-try:
-    import importlib
-
-    importlib.import_module("pyppeteer")
-
-    png_bytes = app.get_graph().draw_mermaid_png(
-        draw_method=MermaidDrawMethod.PYPPETEER
-    )  # pyright: ignore[reportUndefinedVariable]
-    with open(graph_image_path, "wb") as f:
-        f.write(png_bytes)
-    logger.info("Graph visualization saved (local Pyppeteer)")
-except Exception:
-    try:
-        mermaid_src = app.get_graph().draw_mermaid()
-        render_with_mmdc(graph_image_path, mermaid_src)
-        logger.info("Graph visualization saved (mmdc CLI)")
-    except FileNotFoundError:
-        logger.warning(
-            "mmdc CLI not found. To install: npm install -g @mermaid-js/mermaid-cli"
-        )
-        logger.warning("Skipping graph visualization generation...")
-    except Exception as e_cli:
-        logger.warning("Failed to generate graph visualization with mmdc: %s", e_cli)
-        logger.warning("Skipping graph visualization generation...")
-
 
 def get_agent_response(payload: AgentPayload):
     now = datetime.now()
     main_system_prompt = main_system_prompt_template.format(
         date=now,
         ontology_prompt=get_ontology_prompt(ONTOLOGY),
-        dialects=payload.get("dialects"),
+        dialect=payload.get("dialect"),
     )
     messages = [SystemMessage(content=main_system_prompt)]
     if payload.get("history"):
@@ -100,8 +41,8 @@ def get_agent_response(payload: AgentPayload):
     state: AgentState = {
         "llm": llm_client,
         "initial_question": payload["question"],
-        "dialects": payload.get("dialects"),
-        "db_connector": payload.get("db_connector"),
+        "dialect": payload.get("dialect"),
+        "connector": payload.get("connector"),
         "messages": messages,
         "decision": "",
         "path_state": initial_path_state,
@@ -140,7 +81,7 @@ def get_agent_response(payload: AgentPayload):
     else:
         answer = {"response": str(final_response)}
 
-    logger.info("💬 Final answer to user:\n%s", answer)
+    logger.info("Final answer to user:\n%s", answer)
     return answer
 
 

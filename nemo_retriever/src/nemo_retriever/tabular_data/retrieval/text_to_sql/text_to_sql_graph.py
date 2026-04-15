@@ -1,23 +1,23 @@
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from langchain_core.messages import HumanMessage
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentPayload,
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_preparation import CandidatePreparationAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_retieval import CandidateRetrievalAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.entities_extraction import EntitiesExtractionAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.intent_validation import IntentValidationAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.response import CalculationResponseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_execution import SQLExecutionAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_from_semantic import SQLFromSemanticAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_from_tables import SQLFromTablesAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_reconstruction import SQLReconstructionAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_unconstructable import SQLUnconstructableAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.sql_parse_validation import SQLValidationAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import agent_wrapper
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.candidates_preparation import CandidatePreparationAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.candidates_retieval import CandidateRetrievalAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.response import ResponseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromSemanticAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import agent_wrapper
 import logging
 
 logger = logging.getLogger(__name__)
@@ -46,13 +46,13 @@ def route_sql_validation(state: AgentState) -> str:
         state["path_state"]["sql_attempts"] = attempts + 1
         if attempts == 4:
             logger.info(
-                "⚠️ Can not construct sql from snippets, try from relevant tables. Fallback."
+                "Can not construct sql from snippets, try from relevant tables. Fallback."
             )
             return "fallback"  # try constructing from tables, not only snippets
         elif attempts < 8:
             return "invalid_sql"
         elif attempts == 8:
-            logger.error("❌ SQL construction failed after 8 attempts")
+            logger.error("SQL construction failed after 8 attempts")
             return "unconstructable"
 
     else:
@@ -60,7 +60,7 @@ def route_sql_validation(state: AgentState) -> str:
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
         if reconstruction_count > 5:
             logger.info(
-                f"⚠️ Skipping intent validation after {reconstruction_count} reconstructions"
+                f"Skipping intent validation after {reconstruction_count} reconstructions"
             )
             return "skip_intent_validation"
         return "valid_sql"
@@ -190,7 +190,7 @@ def create_graph():
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
     sql_execution_agent = SQLExecutionAgent()
-    calculation_response_agent = CalculationResponseAgent()
+    response_agent = ResponseAgent()
     sql_unconstructable_agent = SQLUnconstructableAgent()
 
 
@@ -228,7 +228,7 @@ def create_graph():
         "execute_sql_query", agent_wrapper(sql_execution_agent)
     )
     format_and_respond_node = _make_node(
-        "format_and_respond", agent_wrapper(calculation_response_agent)
+        "format_and_respond", agent_wrapper(response_agent)
     )
     unconstructable_sql_response_node = _make_node(
         "unconstructable_sql_response", agent_wrapper(sql_unconstructable_agent)

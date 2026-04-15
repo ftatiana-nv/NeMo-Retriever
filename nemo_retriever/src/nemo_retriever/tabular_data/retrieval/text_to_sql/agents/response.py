@@ -6,16 +6,16 @@ final response dict (with DB result, sql_code, semantic elements, etc.),
 and stores it in ``path_state["final_response"]``.
 
 Combines the responsibilities of the former SQLResponseFormattingAgent and
-CalculationResponseAgent into a single graph node.
+ResponseAgent into a single graph node.
 """
 
 import logging
 from typing import Dict, Any
 
 from langchain_core.messages import AIMessage
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     Labels,
     format_response,
     get_semantic_entities_ids,
@@ -26,13 +26,13 @@ from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
 logger = logging.getLogger(__name__)
 
 
-class CalculationResponseAgent(BaseAgent):
+class ResponseAgent(BaseAgent):
     """
     Final-step agent: format SQL results into markdown, attach DB output,
     and set ``path_state["final_response"]``.
 
     Input Requirements:
-    - path_state["llm_calc_response"]: SQLGenerationModel
+    - path_state["sql_generation_result"]: SQLGenerationModel
     - path_state["sql_response_from_db"]: DB execution result (optional)
     - path_state["relevant_tables"]: table dicts
     - path_state["candidates"]: semantic candidates
@@ -47,7 +47,7 @@ class CalculationResponseAgent(BaseAgent):
 
     def validate_input(self, state: AgentState) -> bool:
         path_state = state.get("path_state", {})
-        llm_response = path_state.get("llm_calc_response")
+        llm_response = path_state.get("sql_generation_result")
         if not llm_response:
             self.logger.warning("No LLM response found for calculation response")
             return False
@@ -55,7 +55,7 @@ class CalculationResponseAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
-        llm_response = path_state.get("llm_calc_response")
+        llm_response = path_state.get("sql_generation_result")
 
         sql_code = getattr(llm_response, "sql_code", "")
         tables_ids = getattr(llm_response, "tables_ids", [])
@@ -86,7 +86,7 @@ class CalculationResponseAgent(BaseAgent):
             response=formatted_response,
         )
 
-        # --- final dict assembly (formerly CalculationResponseAgent) ---
+        # --- final dict assembly ---
         sql_columns = path_state.get("sql_columns", [])
         sem_ids = []
         if hasattr(llm_response, "semantic_elements"):
