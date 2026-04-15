@@ -17,7 +17,6 @@ class AgentPayload(TypedDict):
     """Payload received from the API."""
 
     question: str
-    history: list[dict[str, str]]
     path_state: NotRequired[dict]
     dialect: NotRequired[str]
     connector: NotRequired[Any]

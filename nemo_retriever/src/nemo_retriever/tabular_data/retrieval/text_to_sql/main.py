@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 
-from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload, AgentState
@@ -27,14 +26,10 @@ def get_agent_response(payload: AgentPayload):
         ontology_prompt=get_ontology_prompt(ONTOLOGY),
         dialect=payload.get("dialect"),
     )
-    messages = [SystemMessage(content=main_system_prompt)]
-    if payload.get("history"):
-        chat_history = ChatMessageHistory()
-        for history in payload.get("history", []):
-            chat_history.add_user_message(history["question"])
-            chat_history.add_ai_message(history["response"])
-        messages.extend(chat_history.messages)
-    messages.append(HumanMessage(content=payload["question"]))
+    messages = [
+        SystemMessage(content=main_system_prompt),
+        HumanMessage(content=payload["question"]),
+    ]
 
     initial_path_state = dict(payload.get("path_state") or {})
 

@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Omni-lite extension of :class:`nemo_retriever.retriever.Retriever` with optional
+"""text-to-sql extension of :class:`nemo_retriever.retriever.Retriever` with optional
 LanceDB ``metadata``-based ``label`` filtering. Keeps upstream ``retriever.py`` unchanged.
 """
 
@@ -26,7 +26,7 @@ def _trunc_for_log(s: Optional[str], max_len: int = _MAX_LOG_PRED_LEN) -> str:
     return s[: max_len - 20] + f"...(truncated,len={len(s)})"
 
 
-class OmniLiteRetriever(Retriever):
+class TextToSqlRetriever(Retriever):
     """Same as :class:`~nemo_retriever.retriever.Retriever`, plus optional ``label_in``.
 
     Rows may store the semantic label in a top-level ``label`` column and/or inside the
@@ -117,7 +117,7 @@ class OmniLiteRetriever(Retriever):
         import numpy as np
 
         logger.info(
-            "OmniLiteRetriever._search_lancedb: start uri=%r table=%r n_vectors=%d "
+            "TextToSqlRetriever._search_lancedb: start uri=%r table=%r n_vectors=%d "
             "label_in=%s hybrid=%s reranker=%s top_k=%s refine_factor=%s nprobes(config)=%s vector_column=%r",
             lancedb_uri,
             lancedb_table,
@@ -132,18 +132,18 @@ class OmniLiteRetriever(Retriever):
         )
 
         try:
-            logger.info("OmniLiteRetriever._search_lancedb: connecting lancedb.connect(%r)", lancedb_uri)
+            logger.info("TextToSqlRetriever._search_lancedb: connecting lancedb.connect(%r)", lancedb_uri)
             db = lancedb.connect(lancedb_uri)
-            logger.info("OmniLiteRetriever._search_lancedb: open_table(%r)", lancedb_table)
+            logger.info("TextToSqlRetriever._search_lancedb: open_table(%r)", lancedb_table)
             table = db.open_table(lancedb_table)
         except Exception:
-            logger.exception("OmniLiteRetriever._search_lancedb: connect/open_table failed")
+            logger.exception("TextToSqlRetriever._search_lancedb: connect/open_table failed")
             raise
 
         field_names = [f.name for f in table.schema]
         label_where = self._build_label_where(field_names, label_in)
         logger.info(
-            "OmniLiteRetriever._search_lancedb: schema fields=%s label_where=%s",
+            "TextToSqlRetriever._search_lancedb: schema fields=%s label_where=%s",
             field_names,
             _trunc_for_log(label_where) if label_where else "None (no label filter)",
         )
@@ -151,17 +151,17 @@ class OmniLiteRetriever(Retriever):
         effective_nprobes = int(self.nprobes)
         if effective_nprobes <= 0:
             try:
-                logger.info("OmniLiteRetriever._search_lancedb: resolving nprobes via table.list_indices()")
+                logger.info("TextToSqlRetriever._search_lancedb: resolving nprobes via table.list_indices()")
                 for idx in table.list_indices():
                     num_parts = getattr(idx, "num_partitions", None)
                     if num_parts and int(num_parts) > 0:
                         effective_nprobes = int(num_parts)
                         break
             except Exception:
-                logger.exception("OmniLiteRetriever._search_lancedb: list_indices failed; using fallback nprobes")
+                logger.exception("TextToSqlRetriever._search_lancedb: list_indices failed; using fallback nprobes")
             if effective_nprobes <= 0:
                 effective_nprobes = 16
-        logger.info("OmniLiteRetriever._search_lancedb: effective_nprobes=%s", effective_nprobes)
+        logger.info("TextToSqlRetriever._search_lancedb: effective_nprobes=%s", effective_nprobes)
 
         results: list[list[dict[str, Any]]] = []
         for i, vector in enumerate(query_vectors):
@@ -173,7 +173,7 @@ class OmniLiteRetriever(Retriever):
                 else (query_texts[i] if i < len(query_texts) else "")
             )
             logger.info(
-                "OmniLiteRetriever._search_lancedb: query[%d] text_preview=%r top_k=%s where=%s",
+                "TextToSqlRetriever._search_lancedb: query[%d] text_preview=%r top_k=%s where=%s",
                 i,
                 qpreview,
                 int(top_k),
@@ -212,7 +212,7 @@ class OmniLiteRetriever(Retriever):
                     )
                 except Exception:
                     logger.exception(
-                        "OmniLiteRetriever._search_lancedb: hybrid search failed query[%d] where=%s",
+                        "TextToSqlRetriever._search_lancedb: hybrid search failed query[%d] where=%s",
                         i,
                         _trunc_for_log(label_where) if label_where else "None",
                     )
@@ -242,7 +242,7 @@ class OmniLiteRetriever(Retriever):
                     hits = chain.select(dense_select).limit(int(top_k)).to_list()
                 except Exception:
                     logger.exception(
-                        "OmniLiteRetriever._search_lancedb: dense vector search failed query[%d] "
+                        "TextToSqlRetriever._search_lancedb: dense vector search failed query[%d] "
                         "vector_column=%r where=%s",
                         i,
                         self.vector_column_name,
@@ -250,13 +250,13 @@ class OmniLiteRetriever(Retriever):
                     )
                     raise
             logger.info(
-                "OmniLiteRetriever._search_lancedb: query[%d] ok n_hits=%d",
+                "TextToSqlRetriever._search_lancedb: query[%d] ok n_hits=%d",
                 i,
                 len(hits),
             )
             results.append(hits)
         logger.info(
-            "OmniLiteRetriever._search_lancedb: done total_query_batches=%d",
+            "TextToSqlRetriever._search_lancedb: done total_query_batches=%d",
             len(results),
         )
         return results
@@ -298,7 +298,7 @@ class OmniLiteRetriever(Retriever):
         endpoint = self._resolve_embedding_endpoint()
         if endpoint is not None:
             logger.info(
-                "OmniLiteRetriever.queries: embedding via NIM endpoint=%r model=%r n_queries=%d",
+                "TextToSqlRetriever.queries: embedding via NIM endpoint=%r model=%r n_queries=%d",
                 endpoint,
                 resolved_embedder,
                 len(query_texts),
@@ -310,7 +310,7 @@ class OmniLiteRetriever(Retriever):
             )
         else:
             logger.info(
-                "OmniLiteRetriever.queries: embedding via local HF model=%r n_queries=%d",
+                "TextToSqlRetriever.queries: embedding via local HF model=%r n_queries=%d",
                 resolved_embedder,
                 len(query_texts),
             )
@@ -321,7 +321,7 @@ class OmniLiteRetriever(Retriever):
 
         _vdim = len(vectors[0]) if vectors and vectors[0] is not None else 0
         logger.info(
-            "OmniLiteRetriever.queries: embeddings computed dim=%s calling _search_lancedb label_in=%s",
+            "TextToSqlRetriever.queries: embeddings computed dim=%s calling _search_lancedb label_in=%s",
             _vdim,
             list(label_in) if label_in is not None else None,
         )

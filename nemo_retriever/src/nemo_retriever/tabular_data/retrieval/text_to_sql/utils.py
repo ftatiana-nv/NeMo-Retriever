@@ -70,7 +70,7 @@ def _make_llm() -> ChatNVIDIA:
 
     
 class Labels(StrEnum):
-    """Semantic labels used by omni-lite candidate retrieval."""
+    """Semantic labels used by text-to-sql candidate retrieval."""
 
     DB = "Database"
     CUSTOM_ANALYSIS = "custom_analysis"
@@ -349,14 +349,14 @@ def _hits_to_semantic_rows(hits: list[dict], _allowed_labels: set[str], k: int) 
     return rows[: int(k)]
 
 
-def _omni_semantic_retriever_init_kwargs(
+def _t2s_retriever_init_kwargs(
     uri: str,
     table_name: str,
     top_k: int,
 ) -> dict:
-    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``OmniLiteRetriever``.
+    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``TextToSqlRetriever``.
 
-    When ``OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
+    When ``T2S_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
     query embeddings go to that HTTP NIM / OpenAI-compatible API (same pattern as
     ``EmbedParams.embed_invoke_url`` in tabular ingest) instead of loading the HF model locally.
     """
@@ -366,13 +366,13 @@ def _omni_semantic_retriever_init_kwargs(
         "top_k": top_k,
     }
     http_ep = (
-        (os.environ.get("OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT") or "").strip()
+        (os.environ.get("T2S_EMBEDDING_HTTP_ENDPOINT") or "").strip()
         or (os.environ.get("EMBEDDING_HTTP_ENDPOINT") or "").strip()
     )
     if http_ep:
         kwargs["embedding_http_endpoint"] = http_ep
         kwargs["embedding_api_key"] = (os.environ.get("NVIDIA_API_KEY") or "").strip()
-    model = (os.environ.get("OMNI_SEMANTIC_EMBEDDER_MODEL") or "").strip()
+    model = (os.environ.get("T2S_EMBEDDER_MODEL") or "").strip()
     if model:
         kwargs["embedder"] = model
     return kwargs
@@ -384,31 +384,31 @@ def search_lancedb_semantic_index(
     label_filter: list[str] | None = None,
 ) -> list[dict]:
     """
-    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override.OmniLiteRetriever`
+    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override.TextToSqlRetriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
-    ``OmniLiteRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
+    ``TextToSqlRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
     (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
     ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
 
-    Env — LanceDB: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
-    ``OMNI_SEMANTIC_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
+    Env — LanceDB: ``T2S_LANCEDB_URI`` (default ``lancedb``),
+    ``T2S_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
 
     Env — **remote embeddings** (optional, avoids local HF load): set
-    ``OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) to e.g.
+    ``T2S_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) to e.g.
     ``https://integrate.api.nvidia.com/v1``, and ``NVIDIA_API_KEY`` for the hosted API.
-    Optional: ``OMNI_SEMANTIC_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
+    Optional: ``T2S_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
     """
-    from nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override import OmniLiteRetriever
+    from nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override import TextToSqlRetriever
 
-    uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
-    table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
+    uri = os.environ.get("T2S_LANCEDB_URI", "lancedb")
+    table_name = os.environ.get("T2S_LANCEDB_TABLE", "nv-ingest-tabular")
     allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
     limit = max(1, int(k))
 
-    retriever = OmniLiteRetriever(
-        **_omni_semantic_retriever_init_kwargs(uri, table_name, limit),
+    retriever = TextToSqlRetriever(
+        **_t2s_retriever_init_kwargs(uri, table_name, limit),
         # reranker=True,  # enable second-stage reranking
 
     )
