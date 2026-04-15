@@ -119,11 +119,12 @@ class SQLDatabase(ABC):
         """
 
     @property
+    @abstractmethod
     def dialect(self) -> str:
         """Return the dialect of the database.
 
         Returns:
-            The dialect of the database in string format.
+            A sqlglot-compatible dialect name for this engine (e.g. ``"duckdb"``, ``"snowflake"``).
         """
 
     # ------------------------------------------------------------------

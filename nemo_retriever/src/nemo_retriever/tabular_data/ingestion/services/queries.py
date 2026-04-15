@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import time
@@ -23,8 +27,8 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
     """Parse a SQL query using sqlglot extraction.
 
     Identifies referenced tables and columns for all SQL statement types without
-    building a full AST.  Populates ``query_obj.tables_ids`` and
-    ``query_obj.reached_columns_ids``.
+    building a full AST.  Updates ``query_obj.tables_ids`` and appends SQL→table
+    and SQL→column edges to ``query_obj.edges``.
 
     Returns True when at least one recognised table was found, False otherwise.
     """
@@ -37,7 +41,6 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
     if not table_matches:
         return False
 
-    column_ids: list[str] = []
     for table_key, match in table_matches.items():
         # table_key may be "schema.table" or just "table"; bare name is always the last part.
         bare_name = table_key.split(".")[-1]
@@ -69,7 +72,6 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
             try:
                 if schema.is_column_in_table(table_node, col_name):
                     col_node = schema.get_column_node(col_name, bare_name)
-                    column_ids.append(str(col_node.id))
                     query_obj.edges.append((query_obj.sql_node, col_node, edge_props))
             except Exception:
                 continue
@@ -94,7 +96,7 @@ def parse_query_single(
         count=1,
         dialect=dialect,
     )
-    is_parsed = parse_query_slim(q=sql, query_obj=query_obj, dialect=dialect, schemas=schemas)
+    is_parsed = parse_query_slim(sql_text=sql, query_obj=query_obj, dialect=dialect, schemas=schemas)
     if not is_parsed:
         return None
     query_obj.sql_node.add_property("nodes_count", query_obj.get_nodes_counter())
