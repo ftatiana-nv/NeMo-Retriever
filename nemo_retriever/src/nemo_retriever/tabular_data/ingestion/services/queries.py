@@ -10,7 +10,11 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.utils import chunks
 from tqdm import tqdm
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
+from nemo_retriever.tabular_data.ingestion.dal.queries_dal import (
+    add_query,
+    get_sql_by_full_query,
+    update_counters_and_timestamps_for_query_and_affected_data,
+)
 
 
 from nemo_retriever.tabular_data.ingestion.model.query import Query
@@ -129,8 +133,17 @@ def parse_queries_df(
                 schemas=schemas,
             )
             if is_parsed:
-                query_obj.sql_node.add_property("nodes_count", query_obj.get_nodes_counter())
-                parsed_queries.update({query_obj.id: query_obj})
+                existing_query_id = get_sql_by_full_query(sql_text)
+                if existing_query_id:
+                    update_counters_and_timestamps_for_query_and_affected_data(
+                        identical_sql_id=existing_query_id,
+                        sql_node=query_obj.sql_node,
+                    )
+                    logger.info("Found existing SQL in graph by full text; updated counters.")
+                    continue
+                else:
+                    query_obj.sql_node.add_property("nodes_count", query_obj.get_nodes_counter())
+                    parsed_queries.update({query_obj.id: query_obj})
         except Exception as err:
             logger.info("Failed parsing query")
             logger.exception(err)
