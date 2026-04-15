@@ -54,10 +54,12 @@ class RetrievalStore:
     """Mutable per-request store written by the retrieval tools, read by the runtime.
 
     Mirrors the ``ExecutionStore`` pattern from Phase 2:
-    - ``decompose_question`` writes to ``entities``.
+    - ``decompose_question`` writes to ``entities`` and ``question``.
     - ``retrieve_for_entity`` appends to ``entity_results``, ``accumulated_tables``,
       ``accumulated_fks``, and ``custom_candidates``.
     - ``synthesize_expression`` patches the matching entry in ``entity_results``.
+    - ``filter_relevant_tables`` prunes ``accumulated_tables`` and ``accumulated_fks``
+      in-place based on LLM relevance judgement.
 
     The runtime calls ``as_context()`` after the agent finishes to build the
     ``RetrievalContext`` directly from store state — no JSON parsing of agent
@@ -65,6 +67,7 @@ class RetrievalStore:
     """
 
     def __init__(self) -> None:
+        self.question: str = ""
         self.entities: list[dict] = []
         self.entity_results: list[dict] = []
         self.accumulated_tables: list[dict] = []
@@ -246,6 +249,7 @@ Order the entities list by priority ascending in your output."""
             return "decompose_question failed — no entities extracted."
 
         entities = sorted(result.model_dump()["entities"], key=lambda e: e.get("priority", 99))
+        store.question = question
         store.entities = entities
 
         lines = [f"Extracted {len(entities)} entities (call retrieve_for_entity for each):"]
@@ -439,6 +443,100 @@ def _patch_expression(store: RetrievalStore, entity_term: str, expression: str, 
 
 
 # ---------------------------------------------------------------------------
+# Tool 4 — filter_relevant_tables
+# ---------------------------------------------------------------------------
+
+
+class _TableFilterResult(BaseModel):
+    relevant_table_names: list[str] = Field(
+        ...,
+        description=(
+            "Names of tables (exact match from the provided schema) that are genuinely needed "
+            "to answer the user question. Omit any table whose subject domain does not match "
+            "the question's intent, even if one of its columns happened to match a search term."
+        ),
+    )
+
+
+def _make_filter_relevant_tables_tool(store: RetrievalStore, llm: Any):
+    """Return a ``filter_relevant_tables`` tool that prunes *store.accumulated_tables* in-place."""
+
+    @tool
+    def filter_relevant_tables() -> str:
+        """Remove tables that are not relevant to the user question.
+
+        Call this ONCE after all retrieve_for_entity (and synthesize_expression) calls
+        are complete. The tool compares every accumulated table against the question's
+        intent and drops tables whose domain does not match — even if the vector search
+        retrieved them because they share a column name with a search term.
+
+        No arguments needed; the tool reads the question and tables from the store.
+
+        Returns:
+            A summary of which tables were kept and which were removed.
+        """
+        tables = store.accumulated_tables
+        if not tables:
+            return "No tables in store — nothing to filter."
+
+        schema_lines: list[str] = []
+        for t in tables:
+            t_name = t.get("name") or ""
+            t_desc = t.get("description") or ""
+            col_names = []
+            for col in t.get("columns") or []:
+                if isinstance(col, dict):
+                    col_names.append(col.get("name") or "")
+                elif isinstance(col, str):
+                    col_names.append(col)
+            header = f"{t_name}" + (f" — {t_desc}" if t_desc else "")
+            schema_lines.append(f"  {header}: [{', '.join(c for c in col_names if c)}]")
+
+        schema_str = "\n".join(schema_lines)
+
+        prompt = f"""You are a database schema relevance filter.
+
+User question: "{store.question}"
+
+The following tables were retrieved by a vector search. Your job is to keep ONLY the
+tables that are genuinely needed to answer this question. Remove any table whose
+subject domain does not match the question's intent, even if one of its columns
+coincidentally matched a search term.
+
+Retrieved tables:
+{schema_str}
+
+Return only the names of relevant tables. Use the exact table names from the list above."""
+
+        messages = [SystemMessage(content=prompt)]
+        result = invoke_with_structured_output(llm, messages, _TableFilterResult)
+
+        if result is None:
+            return "filter_relevant_tables: LLM call failed — tables unchanged."
+
+        keep = set(result.relevant_table_names)
+        before = [t.get("name") for t in tables]
+        store.accumulated_tables = [t for t in tables if t.get("name") in keep]
+
+        # Remove FKs whose both sides are no longer present
+        remaining_names = {t.get("name") for t in store.accumulated_tables}
+        store.accumulated_fks = [
+            fk
+            for fk in store.accumulated_fks
+            if fk.get("from_table") in remaining_names or fk.get("to_table") in remaining_names
+        ]
+
+        removed = [n for n in before if n not in keep]
+        kept = [n for n in before if n in keep]
+        parts = [f"Kept {len(kept)}: {kept}"]
+        if removed:
+            parts.append(f"Removed {len(removed)}: {removed}")
+        return " | ".join(parts)
+
+    return filter_relevant_tables
+
+
+# ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
 
@@ -464,6 +562,7 @@ def build_retrieval_tools(payload: AgentPayload, llm: Any) -> tuple[list, Retrie
         _make_decompose_question_tool(llm, store),
         _make_retrieve_for_entity_tool(store),
         _make_synthesize_expression_tool(llm, store),
+        _make_filter_relevant_tables_tool(store, llm),
     ], store
 
 

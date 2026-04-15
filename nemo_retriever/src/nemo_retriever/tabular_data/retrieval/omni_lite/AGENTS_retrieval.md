@@ -53,8 +53,15 @@ For any entity returned as **NOT COVERED**: call `synthesize_expression(entity_t
 The tool reads all accumulated columns from the store automatically — no arguments needed besides the entity term.
 If synthesis fails → entity will be marked `unresolved`.
 
-### Step 4 — Done
-When all entities are processed, reply with: **"Retrieval complete."**
+### Step 4 — filter_relevant_tables
+Call `filter_relevant_tables()` **once**, after all `retrieve_for_entity` and `synthesize_expression` calls are complete.
+
+The tool removes tables whose subject domain does not match the question's intent — even if the vector
+search retrieved them because they happened to share a column name with a search term.
+No arguments needed; the tool reads the question and tables from the store automatically.
+
+### Step 5 — Done
+When all steps are complete, reply with: **"Retrieval complete."**
 The runtime reads results directly from the store — no JSON output required from you.
 
 ---
@@ -64,6 +71,7 @@ The runtime reads results directly from the store — no JSON output required fr
 - **Never generate SQL** — no queries, CTEs, or fragments.
 - **Never call `validate_sql` or `execute_sql`**.
 - **Call retrieve_for_entity for EVERY entity** — never skip one.
+- **Call filter_relevant_tables exactly once**, after all retrieval and synthesis is done.
 - **synthesize_expression uses only already-retrieved columns** — never invent column names.
 
 ---

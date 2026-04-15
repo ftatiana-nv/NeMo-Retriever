@@ -165,7 +165,8 @@ def _format_user_prompt(question: str) -> str:
         "  - You MUST call retrieve_for_entity for EVERY entity. Do NOT stop after the first one.\n"
         "  - The tool manages accumulated state automatically — just pass entity_term and entity_type.\n\n"
         "Step 3 — for any entity returned as NOT COVERED, call synthesize_expression.\n\n"
-        "Step 4 — when all entities are processed, reply with: 'Retrieval complete.'"
+        "Step 4 — call filter_relevant_tables() once to remove off-topic tables.\n\n"
+        "Step 5 — reply with: 'Retrieval complete.'"
     )
 
 
