@@ -1,8 +1,9 @@
-"""
-OmniLite Deep Agent runtime.
+"""Phase 2 — SQL Deep Agent runtime.
 
-Creates a Deep Agent equipped with domain-specific tools (entity extraction,
-semantic retrieval, SQL validation, SQL execution) and omni_lite skills/AGENTS.md.
+Creates a Deep Agent whose only job is to generate and validate SQL from the
+``RetrievalContext`` produced by Phase 1.  The context is injected into the
+agent's system prompt so the SQL generation starts with a clean context
+window that contains no tool-call history from the retrieval phase.
 
 Usage
 -----
@@ -11,9 +12,10 @@ Usage
     from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
         create_omni_lite_agent,
         extract_structured_answer,
+        format_omni_lite_user_prompt,
     )
 
-    agent = create_omni_lite_agent(payload, llm)
+    agent, store = create_omni_lite_agent(payload, retrieval_ctx, llm=llm_client)
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
     answer = extract_structured_answer(result)
 """
@@ -30,6 +32,7 @@ from typing import Any
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 
+from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
 from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore, build_omni_lite_tools
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
@@ -47,29 +50,30 @@ _REQUIRED_ANSWER_KEYS = frozenset({"sql_code", "answer", "result"})
 # ---------------------------------------------------------------------------
 
 
-def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> tuple[Any, ExecutionStore]:
-    """Create a Deep Agent for OmniLite Text-to-SQL.
+def create_omni_lite_agent(
+    payload: AgentPayload,
+    retrieval_ctx: RetrievalContext,
+    llm: Any | None = None,
+) -> tuple[Any, ExecutionStore]:
+    """Create a Phase 2 SQL Deep Agent.
 
-    The agent is equipped with:
-    - Four domain tools (``extract_entities``, ``retrieve_semantic_candidates``,
-      ``validate_sql``, ``execute_sql``) from ``tools.py``
-    - ``AGENTS.md`` as persistent system memory
-    - Three SKILL.md files: ``candidate-retrieval``, ``sql-generation``,
-      ``answer-formatting``
-    - A ``FilesystemBackend`` rooted at the ``omni_lite/`` directory
+    The agent is equipped with a single tool (``validate_sql``) and the
+    ``AGENTS.md`` persistent memory.  The ``RetrievalContext`` from Phase 1 is
+    injected into the system prompt so the agent has full schema context without
+    any retrieval tool-call history in its message thread.
 
     Args:
-        payload: The ``AgentPayload`` received from the caller.  Used to bind
-            session-scoped values (``db_connector``, ``dialects``) to tools.
+        payload: The ``AgentPayload`` from the caller.  Used to bind
+            session-scoped values (``dialects``) to ``validate_sql``.
+        retrieval_ctx: The ``RetrievalContext`` produced by Phase 1.
         llm: Optional pre-built LLM client.  When ``None``, ``_make_llm()`` is
             called automatically.
 
     Returns:
         Tuple of (agent, store):
         - agent: Deep Agent instance ready for ``agent.invoke()``.
-        - store: ``ExecutionStore`` that is populated in-place as the agent
-          runs — ``store.sql`` holds the last validated SQL and
-          ``store.result`` holds the last successful query result.
+        - store: ``ExecutionStore`` populated in-place as the agent runs.
+          ``store.sql`` holds the last validated SQL.
     """
     if llm is None:
         llm = _make_llm()
@@ -80,10 +84,10 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> tup
     agents_md = str(_BASE_DIR / "AGENTS.md")
     memory = [agents_md] if Path(agents_md).exists() else []
 
-    catalog_prompt = _build_catalog_prompt(payload)
+    system_prompt = _build_system_prompt(payload, retrieval_ctx)
 
     logger.info(
-        "Creating OmniLite Deep Agent | tools=%s | skills=%s | memory=%s",
+        "Creating SQL Deep Agent (Phase 2) | tools=%s | skills=%s | memory=%s",
         [getattr(t, "name", "?") for t in tools],
         skill_dirs,
         memory,
@@ -91,7 +95,7 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> tup
 
     agent = create_deep_agent(
         model=llm,
-        system_prompt=catalog_prompt or None,
+        system_prompt=system_prompt,
         memory=memory,
         skills=skill_dirs or None,
         tools=tools,
@@ -103,7 +107,7 @@ def create_omni_lite_agent(payload: AgentPayload, llm: Any | None = None) -> tup
 
 def _load_skill_dirs() -> list[str]:
     """Return skill directory paths that exist on disk."""
-    skill_names = ["candidate-retrieval", "sql-generation", "answer-formatting"]
+    skill_names = ["sql-generation", "answer-formatting"]
     dirs = []
     for name in skill_names:
         path = _BASE_DIR / "skills" / name
@@ -114,15 +118,49 @@ def _load_skill_dirs() -> list[str]:
     return dirs
 
 
-def _build_catalog_prompt(payload: AgentPayload) -> str | None:
-    """Build an optional system-prompt fragment injecting dialects + date context."""
+def _build_system_prompt(payload: AgentPayload, retrieval_ctx: RetrievalContext) -> str:
+    """Build the system prompt that injects the RetrievalContext for Phase 2.
+
+    The RetrievalContext is serialised as JSON and embedded in the system
+    prompt so the agent has full schema context from the start, without
+    accumulating retrieval tool-call history in the message thread.
+    """
     now = datetime.now()
     dialects = payload.get("dialects") or []
-    lines = [
+
+    lines: list[str] = [
         f"Today's date: {now.year}-{now.month:02d}-{now.day:02d} " f"{now.hour:02d}:{now.minute:02d}:{now.second:02d}.",
     ]
+
     if dialects:
         lines.append(f"Allowed SQL dialects: {', '.join(str(d) for d in dialects)}.")
+
+    lines.append("")
+    lines.append("## RetrievalContext (produced by Phase 1 — use this as your schema source)")
+    lines.append("")
+
+    # Embed the full context as JSON for the agent to reference
+    try:
+        ctx_json = json.dumps(retrieval_ctx, default=str, indent=2)
+    except Exception:
+        ctx_json = "{}"
+    lines.append(ctx_json)
+
+    lines.append("")
+    lines.append(
+        "The RetrievalContext above contains all the tables, columns, foreign keys, "
+        "and SQL snippets you need.  Do NOT call any retrieval tools — retrieval is "
+        "complete.  Your only tool is `validate_sql`.  Generate SQL from the context "
+        "above, then call `validate_sql` immediately.  Fix and retry up to 4 times."
+    )
+
+    if not retrieval_ctx.get("coverage_complete"):
+        lines.append(
+            "\nNote: `coverage_complete` is false — one or more entities could not be "
+            "fully resolved.  Construct the best SQL possible from the available context "
+            "and note any limitations in your `answer` field."
+        )
+
     return "\n".join(lines)
 
 
@@ -136,15 +174,16 @@ def format_omni_lite_user_prompt(
     history: list[dict[str, str]] | None = None,
     dialects: list[str] | None = None,
 ) -> str:
-    """Format the user-turn message sent to the Deep Agent.
+    """Format the user-turn message sent to the Phase 2 SQL Deep Agent.
 
-    Conversation history is inlined as plain text so Deep Agent's flat
+    Conversation history is inlined as plain text so the agent's flat
     messages list receives a single user turn.
 
     Args:
         question: The current user question.
         history: Optional list of ``{"question": ..., "response": ...}`` dicts.
-        dialects: Optional list of allowed SQL dialect names.
+        dialects: Optional list of allowed SQL dialect names (informational;
+            also injected via system prompt).
 
     Returns:
         A formatted string ready to pass as the user message content.
@@ -164,21 +203,20 @@ def format_omni_lite_user_prompt(
     parts.append(f"User question: {question.strip()}")
     parts.append("")
     parts.append(
-        "Step 1 — call extract_entities with the question.\n"
-        "Step 2 — call retrieve_semantic_candidates with the outputs of Step 1.\n"
-        "Step 3 — generate SQL using the retrieved tables, columns, FKs, and snippets.\n"
-        "Step 4 — call validate_sql on the generated SQL; if invalid, fix and retry.\n"
-        "Step 5 — call execute_sql with the validated SQL.\n"
-        "Step 6 — emit your final answer as a single JSON object (no other text):\n"
+        "Your RetrievalContext is in the system prompt above.\n"
+        "Step 1 — Generate SQL using the tables, columns, FKs, and snippets from RetrievalContext.\n"
+        "Step 2 — Call validate_sql immediately (wrap SQL in ```sql ... ``` fences).\n"
+        "Step 3 — If invalid, fix the SQL and call validate_sql again (up to 4 retries).\n"
+        "Step 4 — Emit your final answer as a single JSON object (no other text):\n"
         '  {"sql_code": "<exact SQL>", "answer": "<short explanation>", '
-        '"result": <DB value or null>, "semantic_elements": []}\n'
+        '"result": null, "semantic_elements": []}\n'
         "Nothing before { or after }. No markdown fences. No apologies."
     )
     return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Answer extraction  (mirrors deep_agent_runtime._extract_structured_answer)
+# Answer extraction
 # ---------------------------------------------------------------------------
 
 
@@ -189,8 +227,7 @@ def extract_structured_answer(result: dict) -> dict | None:
     1. Full JSON object with all required keys.
     2. Markdown-style answer with a ```sql block.
     3. Plain-prose SQL — a SQL statement starting at a line boundary and
-       delimited by blank lines or end-of-text (handles cases where the agent
-       embeds the query inline without fences or JSON).
+       delimited by blank lines or end-of-text.
 
     Args:
         result: The dict returned by ``agent.invoke()``.
@@ -279,9 +316,6 @@ def _parse_markdown_answer(text: str) -> dict | None:
     return None
 
 
-# Matches a SQL statement that starts at the beginning of a line with a SQL
-# keyword and continues until the next blank line (two consecutive newlines)
-# or end-of-string.  Works regardless of trailing prose or embedded values.
 _SQL_PROSE_RE = re.compile(
     r"(?m)^" r"((?:SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|EXPLAIN)\b" r".*?)" r"(?=\n[ \t]*\n|\Z)",
     re.IGNORECASE | re.DOTALL,
@@ -289,33 +323,13 @@ _SQL_PROSE_RE = re.compile(
 
 
 def _extract_sql_from_prose(text: str) -> dict | None:
-    """Extract SQL embedded in plain prose (no fences, no JSON).
-
-    Locates the first SQL statement that starts at a line boundary (identified
-    by a leading SQL keyword) and is delimited by a blank line or end-of-text.
-    The surrounding prose becomes the ``answer``.
-
-    Example input::
-
-        Based on the results, the query is:
-
-        SELECT a, b FROM t WHERE x = 'foo'
-
-        This selects rows where x equals 'foo'.
-
-    Args:
-        text: Raw message content string.
-
-    Returns:
-        ``{"sql_code", "answer", "result"}`` dict or ``None`` if no SQL found.
-    """
+    """Extract SQL embedded in plain prose (no fences, no JSON)."""
     m = _SQL_PROSE_RE.search(text)
     if not m:
         return None
     sql_code = m.group(1).strip()
     if not sql_code:
         return None
-    # Use the text outside the SQL block as the answer
     answer = text[: m.start()].strip() + " " + text[m.end() :].strip()
     answer = re.sub(r"\s+", " ", answer).strip()
     logger.debug("_extract_sql_from_prose: extracted SQL from prose (%d chars)", len(sql_code))

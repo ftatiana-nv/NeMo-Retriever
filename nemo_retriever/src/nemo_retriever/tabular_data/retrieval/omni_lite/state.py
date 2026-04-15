@@ -3,6 +3,13 @@ LangGraph agent state and API payload types.
 
 Kept separate from ``graph.py`` to avoid circular imports (agents import state;
 ``graph`` imports agents).
+
+Also re-exports ``RetrievalContext`` and ``EntityCoverage`` from ``context.py``
+so downstream code can import everything from one place::
+
+    from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+        AgentPayload, AgentState, RetrievalContext, EntityCoverage,
+    )
 """
 
 from __future__ import annotations
@@ -11,6 +18,11 @@ from typing import Any, NotRequired, TypedDict
 
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
+from nemo_retriever.tabular_data.retrieval.omni_lite.context import (  # noqa: F401
+    EntityCoverage,
+    RetrievalContext,
+)
 
 
 class AgentPayload(TypedDict):
@@ -44,11 +56,17 @@ def get_question_for_processing(state: AgentState) -> str:
     """
     path_state = state.get("path_state", {})
     # normalized_question = path_state.get("normalized_question")
-    #TODO remove normalized question, for question : give me all student from seattle , seattle was removed
+    # TODO remove normalized question, for question : give me all student from seattle , seattle was removed
     normalized_question = path_state.get("initial_question")
     if normalized_question:
         return normalized_question
     return state.get("initial_question", "")
 
 
-__all__ = ["AgentPayload", "AgentState", "get_question_for_processing"]
+__all__ = [
+    "AgentPayload",
+    "AgentState",
+    "EntityCoverage",
+    "RetrievalContext",
+    "get_question_for_processing",
+]

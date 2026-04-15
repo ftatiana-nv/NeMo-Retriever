@@ -1,11 +1,34 @@
+"""3-Phase Text-to-SQL orchestrator.
+
+Phases
+------
+1. **Retrieval Agent** (``retrieval_agent_runtime.run_retrieval_agent``)
+   Decomposes the question into typed entities, retrieves per-entity
+   candidates, and synthesizes SQL expressions for uncovered entities.
+   Returns a ``RetrievalContext``.
+
+2. **SQL Agent** (``omni_lite_runtime.create_omni_lite_agent``)
+   Receives the ``RetrievalContext`` in its system prompt (no retrieval
+   tool-call history) and generates + validates SQL.  Returns a validated
+   SQL string via ``ExecutionStore``.
+
+3. **Execute** (``_execute_sql`` plain function)
+   Runs the validated SQL against the database connector and returns rows.
+"""
+
 import logging
 
+from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
 from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
     create_omni_lite_agent,
     extract_structured_answer,
     format_omni_lite_user_prompt,
 )
+from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_agent_runtime import (
+    run_retrieval_agent,
+)
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
 
 logger = logging.getLogger(__name__)
@@ -17,22 +40,68 @@ except ValueError as e:
     llm_client = None
 
 
-def get_agent_response(payload: AgentPayload):
-    """Convert a natural-language question to SQL using the OmniLite Deep Agent.
+# ---------------------------------------------------------------------------
+# Phase 3 — plain execute function
+# ---------------------------------------------------------------------------
 
-    The public API signature is unchanged from the LangGraph version:
-    accepts an ``AgentPayload`` and returns a response dict with at minimum
-    ``sql_code``, ``answer``, and ``result`` keys.
+
+def _execute_sql(sql: str, db_connector, store: ExecutionStore) -> list | None:
+    """Execute validated SQL and return rows.
+
+    Prefers ``store.sql`` (the SQL captured by ``validate_sql``) over the
+    agent-supplied argument, which may be truncated due to context overflow.
 
     Args:
-        payload: Caller-supplied payload.  Required: ``question``.
-            Optional: ``history``, ``dialects``, ``db_connector``, ``path_state``.
+        sql: SQL string from the Phase 2 agent's final message.
+        db_connector: Database connector (e.g. DuckDB) with an ``execute``
+            method that returns a DataFrame.
+        store: ``ExecutionStore`` from Phase 2 (``store.sql`` holds the last
+            validated SQL).
 
     Returns:
-        dict with keys ``sql_code``, ``answer``, ``result``,
-        ``semantic_elements`` (and possibly others from the agent).
+        List of row dicts, or ``None`` on failure / missing connector.
     """
-    agent, store = create_omni_lite_agent(payload, llm=llm_client)
+    effective_sql = store.sql or sql
+    if not effective_sql:
+        logger.warning("_execute_sql: no SQL to execute")
+        return None
+    if db_connector is None:
+        logger.warning("_execute_sql: no db_connector provided — skipping execution")
+        return None
+    try:
+        df = db_connector.execute(effective_sql)
+        if df is not None and not df.empty:
+            return df.to_dict(orient="records")
+        return []
+    except Exception as exc:
+        logger.error("_execute_sql failed: %s", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — SQL Agent
+# ---------------------------------------------------------------------------
+
+
+def _run_sql_agent(
+    payload: AgentPayload,
+    retrieval_ctx: RetrievalContext,
+    llm,
+    max_retries: int = 3,
+) -> tuple[str, ExecutionStore]:
+    """Run the Phase 2 SQL Deep Agent and return (sql_string, store).
+
+    Args:
+        payload: Original caller payload.
+        retrieval_ctx: Output from Phase 1.
+        llm: Shared LLM client.
+        max_retries: Number of agent invocation attempts.
+
+    Returns:
+        ``(sql, store)`` — ``sql`` is the validated SQL string (may be empty
+        on failure), ``store`` carries ``store.sql`` for Phase 3.
+    """
+    agent, store = create_omni_lite_agent(payload, retrieval_ctx, llm=llm)
 
     prompt = format_omni_lite_user_prompt(
         question=payload["question"],
@@ -40,47 +109,85 @@ def get_agent_response(payload: AgentPayload):
         dialects=payload.get("dialects"),
     )
 
-    max_retries = 3
     last_error: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:
             result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
 
-            # Primary: use the store populated directly by the tools
-            store_answer = store.as_answer()
-            if store_answer is not None:
-                logger.info("OmniLite Deep Agent store answer (attempt %d): %s", attempt, store_answer)
-                return store_answer
+            # Use the store's validated SQL if available (most reliable source)
+            if store.sql:
+                logger.info("SQL Agent store SQL (attempt %d): %s …", attempt, store.sql[:80])
+                return store.sql, store
 
-            # Secondary: scan agent messages for a formatted final answer
+            # Fall back to parsing the agent's final message
             parsed = extract_structured_answer(result)
-            if parsed is not None:
-                logger.info("OmniLite Deep Agent parsed answer (attempt %d): %s", attempt, parsed)
-                return parsed
+            if parsed and parsed.get("sql_code"):
+                sql = parsed["sql_code"].strip()
+                logger.info("SQL Agent parsed SQL (attempt %d): %s …", attempt, sql[:80])
+                store.sql = sql
+                return sql, store
 
-            # Fallback: return raw final message content
-            messages = result.get("messages") or []
-            final_msg = messages[-1] if messages else None
-            raw = getattr(final_msg, "content", None) if final_msg is not None else None
-            if raw is not None:
-                answer = {"sql_code": "", "answer": str(raw), "result": None, "semantic_elements": []}
-                logger.info("OmniLite Deep Agent raw fallback (attempt %d)", attempt)
-                return answer
+            logger.warning("SQL Agent attempt %d/%d: no SQL found in output", attempt, max_retries)
 
         except Exception as exc:
-            logger.error(
-                "OmniLite Deep Agent failed (attempt %d/%d): %s",
-                attempt,
-                max_retries,
-                exc,
-            )
+            logger.error("SQL Agent failed (attempt %d/%d): %s", attempt, max_retries, exc)
             last_error = exc
 
+    logger.error("SQL Agent gave up after %d attempts. Last error: %s", max_retries, last_error)
+    return "", store
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+def get_agent_response(payload: AgentPayload) -> dict:
+    """Convert a natural-language question to SQL and execute it.
+
+    Orchestrates the 3-phase pipeline:
+    1. Retrieval Agent → RetrievalContext
+    2. SQL Agent       → validated SQL
+    3. Execute         → result rows
+
+    Args:
+        payload: Caller-supplied payload.  Required: ``question``.
+            Optional: ``history``, ``dialects``, ``db_connector``, ``path_state``.
+
+    Returns:
+        dict with keys ``sql_code``, ``answer``, ``result``,
+        ``semantic_elements``.
+    """
+    question = payload["question"]
+    db_connector = payload.get("db_connector")
+
+    # ── Phase 1: Retrieval ─────────────────────────────────────────────────
+    logger.info("Phase 1 — Retrieval Agent starting for question: %s …", question[:80])
+    retrieval_ctx = run_retrieval_agent(payload, llm=llm_client)
+    logger.info(
+        "Phase 1 — complete | entities=%d | coverage_complete=%s",
+        len(retrieval_ctx.get("entity_coverage", [])),
+        retrieval_ctx.get("coverage_complete"),
+    )
+
+    # ── Phase 2: SQL Generation + Validation ───────────────────────────────
+    logger.info("Phase 2 — SQL Agent starting")
+    sql, store = _run_sql_agent(payload, retrieval_ctx, llm=llm_client)
+    logger.info("Phase 2 — complete | sql_len=%d", len(sql))
+
+    # ── Phase 3: Execute ───────────────────────────────────────────────────
+    logger.info("Phase 3 — executing SQL")
+    result = _execute_sql(sql, db_connector, store)
+    logger.info(
+        "Phase 3 — complete | rows=%s",
+        len(result) if isinstance(result, list) else result,
+    )
+
     return {
-        "sql_code": "",
-        "answer": f"OmniLite agent failed after {max_retries} attempts: {last_error}",
-        "result": None,
+        "sql_code": sql,
+        "answer": "",
+        "result": result,
         "semantic_elements": [],
     }
 
