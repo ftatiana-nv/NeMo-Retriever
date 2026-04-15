@@ -94,7 +94,7 @@ def parse_query_single(
         count=1,
         dialect=dialect,
     )
-    is_parsed = parse_query_slim(q=sql, query_obj=query_obj, dialect=dialect, schemas=schemas)
+    is_parsed = parse_query_slim(sql_text=sql, query_obj=query_obj, dialect=dialect, schemas=schemas)
     if not is_parsed:
         return None
     query_obj.sql_node.add_property("nodes_count", query_obj.get_nodes_counter())
