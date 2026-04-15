@@ -7,7 +7,7 @@ class Query:
         self,
         schemas,
         id,
-        q,
+        sql_text,
         ltimestamp,
         count,
         dialect=None,
@@ -24,12 +24,10 @@ class Query:
             "name": f"query_{str(id)}",
             f"cnt_{month}_{year}": count,
             "total_counter": count,
-            "sql_full_query": q,
+            "sql_full_query": sql_text,
             "last_query_timestamp": ltimestamp,
         }
-        self.sql_node = Neo4jNode(
-            name="query_" + str(id), label=Labels.SQL, props=props, existing_id=id
-        )
+        self.sql_node = Neo4jNode(name="query_" + str(id), label=Labels.SQL, props=props, existing_id=id)
 
     def add_table_to_query(self, table_node, table_name: str):
         if not isinstance(table_node, Query):

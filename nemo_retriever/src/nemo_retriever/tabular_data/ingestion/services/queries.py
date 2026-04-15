@@ -19,7 +19,7 @@ from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
 logger = logging.getLogger(__name__)
 
 
-def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> bool:
+def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dict) -> bool:
     """Parse a SQL query using sqlglot extraction.
 
     Identifies referenced tables and columns for all SQL statement types without
@@ -29,7 +29,7 @@ def parse_query_slim(q: str, query_obj: Query, dialect: str, schemas: dict) -> b
     Returns True when at least one recognised table was found, False otherwise.
     """
     table_matches: dict[str, TableMatch] = extract_tables_and_columns(
-        sql=q,
+        sql=sql_text,
         dialect=dialect,
         all_schemas=schemas,
     )
@@ -89,7 +89,7 @@ def parse_query_single(
     query_obj = Query(
         schemas=schemas,
         id=str(uuid.uuid4()),
-        q=sql,
+        sql_text=sql,
         ltimestamp=datetime.now(),
         count=1,
         dialect=dialect,
@@ -107,32 +107,33 @@ def parse_queries_df(
     queries_df: pd.DataFrame,
     schemas: dict,
 ) -> list[dict[str, str]]:
+    # parsed_queries is mutated in-place (rather than returned) so that each
+    # newly parsed query can be cross-checked against the queries already
+    # parsed in this run before being compared with what is stored in the graph.
     failed_queries: list[dict[str, str]] = []
     for _, row in queries_df.iterrows():
         try:
             sql_id = str(uuid.uuid4())
-            q = row["query_text"]
-            q_timestamp = row["end_time"]
-            q_count = row["count"] if "count" in row else 1
-            q_count = int(q_count) if isinstance(q_count, str) else q_count
+            sql_text = row["query_text"]
+            sql_timestamp = row["end_time"]
+            sql_count = row["count"] if "count" in row else 1
+            sql_count = int(sql_count) if isinstance(sql_count, str) else sql_count
             query_obj = Query(
                 schemas=schemas,
                 id=sql_id,
-                q=q,
-                ltimestamp=q_timestamp,
-                count=q_count,
+                sql_text=sql_text,
+                ltimestamp=sql_timestamp,
+                count=sql_count,
                 dialect=dialect,
             )
             is_parsed = parse_query_slim(
-                q=q,
+                sql_text=sql_text,
                 query_obj=query_obj,
                 dialect=dialect,
                 schemas=schemas,
             )
             if is_parsed:
-                query_obj.sql_node.add_property(
-                    "nodes_count", query_obj.get_nodes_counter()
-                )
+                query_obj.sql_node.add_property("nodes_count", query_obj.get_nodes_counter())
                 parsed_queries.update({query_obj.id: query_obj})
         except Exception as err:
             logger.info("Failed parsing query")
@@ -141,9 +142,7 @@ def parse_queries_df(
     return failed_queries
 
 
-def populate_queries(
-    schemas, queries_df, num_workers, dialect
-):
+def populate_queries(schemas, queries_df, num_workers, dialect):
     before = time.time()
     logger.info(f"Starting to parse {len(queries_df)} queries.")
 
@@ -168,10 +167,7 @@ def populate_queries(
                 maxinterval=10,
             ) as pbar:
                 with ThreadPoolExecutor(num_workers) as executor:
-                    futures = (
-                        executor.submit(add_query, q.get_edges())
-                        for q in parsed_queries.values()
-                    )
+                    futures = (executor.submit(add_query, q.get_edges()) for q in parsed_queries.values())
                     for future in as_completed(futures):
                         future.result()
                         pbar.update(1)

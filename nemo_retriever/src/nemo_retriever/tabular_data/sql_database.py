@@ -118,6 +118,14 @@ class SQLDatabase(ABC):
         ``referenced_column``.
         """
 
+    @property
+    def dialect(self) -> str:
+        """Return the dialect of the database.
+
+        Returns:
+            The dialect of the database in string format.
+        """
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

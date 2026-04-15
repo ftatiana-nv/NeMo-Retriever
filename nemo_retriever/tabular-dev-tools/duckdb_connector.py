@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from pathlib import Path
 import duckdb
 import pandas as pd
 from typing import Optional
@@ -53,6 +54,10 @@ class DuckDB(SQLDatabase):
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
         self.conn = duckdb.connect(database=connection_string, read_only=read_only)
         logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, read_only)
+
+    @property
+    def dialect(self) -> str:
+        return "duckdb"
 
     # ------------------------------------------------------------------
     # Execution
@@ -109,7 +114,11 @@ class DuckDB(SQLDatabase):
         )
 
     def get_queries(self) -> pd.DataFrame:
-        """DuckDB has no built-in query history — returns an empty DataFrame."""
+        """DuckDB has no built-in query history — loads sample spider2-lite queries from CSV."""
+        csv_path = Path(__file__).parent / "sample_spider2_queries.csv"
+        df = pd.read_csv(csv_path)
+        df["end_time"] = datetime.today()
+        return df
 
         queries = ["""WITH RecencyScore AS (
     SELECT customer_unique_id,
