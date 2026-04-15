@@ -52,9 +52,12 @@ class DuckDB(SQLDatabase):
     """
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
-        self.dialect = "duckdb"
         self.conn = duckdb.connect(database=connection_string, read_only=read_only)
         logger.debug("DuckDB connected (database=%r, read_only=%s).", connection_string, read_only)
+
+    @property
+    def dialect(self) -> str:
+        return "duckdb"
 
     # ------------------------------------------------------------------
     # Execution
