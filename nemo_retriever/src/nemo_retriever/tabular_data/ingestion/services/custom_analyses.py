@@ -22,7 +22,7 @@ def populate_custom_analyses(
     """Parse custom analysis SQL snippets and write them to the graph.
 
     Creates two nodes per analysis:
-      - **CustomAnalysis** node with ``name``, ``description``, and ``tags``.
+      - **CustomAnalysis** node with ``name`` and ``description``.
       - **Sql** node with the parsed SQL and table/column edges (via
         ``parse_query_single``).
 

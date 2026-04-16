@@ -49,6 +49,7 @@ def populate_tabular_data(data, num_workers, dialect):
 
     if "fks" in data:
         populate_fks(fks=data["fks"])
+
     if "pks" in data:
         populate_pks(pks=data["pks"])
 
