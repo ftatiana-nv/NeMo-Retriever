@@ -79,9 +79,11 @@ class _QueryPlan(BaseModel):
     tables_to_use: list[str] = Field(
         ...,
         description=(
-            "Exact table names (from relevant_tables in the RetrievalContext) needed to answer "
-            "the question.  Include only tables that contribute a SELECT column, a WHERE "
-            "condition, or a required JOIN leg."
+            "Fully-qualified table references in the form 'SCHEMA.TABLE AS alias' "
+            "(e.g. 'school_scheduling.Students AS s'). "
+            "NEVER omit the schema prefix.  NEVER write just the table name or alias alone. "
+            "Include only tables that contribute a SELECT column, a WHERE condition, "
+            "or a required JOIN leg."
         ),
     )
     join_conditions: list[str] = Field(
