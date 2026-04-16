@@ -28,7 +28,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 from nemo_retriever.tabular_data.retrieval.text_to_sql.models import SQLGenerationModel
-from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_semantic_entities_ids
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_custom_analyses_ids
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class SQLReconstructionAgent(BaseAgent):
     Output:
     - path_state["sql_generation_result"]: Reconstructed SQL response
     - path_state["relevant_tables"]: Relevant tables
-    - path_state["semantic_elements"]: Semantic entity IDs used
+    - path_state["custom_analyses_used"]: Semantic entity IDs used
     - messages: Updated messages with reconstruction
     """
 
@@ -148,10 +148,10 @@ class SQLReconstructionAgent(BaseAgent):
         response_explanation = getattr(response, "response", getattr(response, "thought", "No explanation")) or ""
         self.logger.info(f"Reconstruction explanation: {response_explanation[:100]}...")
 
-        # Extract semantic elements
-        semantic_elements = []
-        if hasattr(response, "semantic_elements"):
-            semantic_elements = get_semantic_entities_ids(response.semantic_elements)
+        # Extract custom analyses
+        custom_analyses_used = []
+        if hasattr(response, "custom_analyses_used"):
+            custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
 
         return {
             "messages": messages,
@@ -159,6 +159,6 @@ class SQLReconstructionAgent(BaseAgent):
                 **path_state,
                 "sql_generation_result": response,
                 "relevant_tables": all_tables if all_tables is not None else path_state.get("relevant_tables", []),
-                "semantic_elements": semantic_elements,
+                "custom_analyses_used": custom_analyses_used,
             },
         }

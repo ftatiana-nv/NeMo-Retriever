@@ -26,7 +26,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     get_all_schemas_ids,
     get_schemas_slim,
-    get_semantic_entities_ids,
+    get_custom_analyses_ids,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class SQLValidationAgent(BaseAgent):
     Output:
     - path_state["sql_response_from_db"]: None (will be set after execution)
     - path_state["sql_columns"]: Column IDs from SQL
-    - path_state["semantic_elements"]: Semantic entity IDs used
+    - path_state["custom_analyses_used"]: Semantic entity IDs used
     - decision: "valid_sql" or "invalid_sql"
     """
 
@@ -101,12 +101,12 @@ class SQLValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        # SQL is valid, extract columns and semantic elements
+        # SQL is valid, extract columns and custom analyses
         sql_columns = validation_result.get("sql_columns") or []
 
-        semantic_elements = []
-        if hasattr(response, "semantic_elements"):
-            semantic_elements = get_semantic_entities_ids(response.semantic_elements)
+        custom_analyses_used = []
+        if hasattr(response, "custom_analyses_used"):
+            custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
 
         # Store connection_data in the format expected by execute_sql_query
         # execute_sql_query expects connections as a list
@@ -114,7 +114,7 @@ class SQLValidationAgent(BaseAgent):
             **path_state,
             "sql_response_from_db": None,  # Will be set after execution
             "sql_columns": sql_columns,
-            "semantic_elements": semantic_elements,
+            "custom_analyses_used": custom_analyses_used,
             "sql_code": response.sql_code,  # Store SQL code for execution
         }
 

@@ -2,7 +2,7 @@
 Calculation Response Agent
 
 Formats SQL generation results into user-friendly markdown, assembles the
-final response dict (with DB result, sql_code, semantic elements, etc.),
+final response dict (with DB result, sql_code, custom analyses, etc.),
 and stores it in ``path_state["final_response"]``.
 
 Combines the responsibilities of the former SQLResponseFormattingAgent and
@@ -18,7 +18,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     Labels,
     format_response,
-    get_semantic_entities_ids,
+    get_custom_analyses_ids,
     prepare_link,
 )
 
@@ -59,7 +59,7 @@ class ResponseAgent(BaseAgent):
         sql_code = getattr(llm_response, "sql_code", "")
         tables_ids = getattr(llm_response, "tables_ids", [])
         response_explanation = getattr(llm_response, "response", "")
-        semantic_elements = getattr(llm_response, "semantic_elements", [])
+        custom_analyses_used = getattr(llm_response, "custom_analyses_used", [])
 
         relevant_tables = path_state.get("relevant_tables", [])
         candidates_with_entities = path_state.get("candidates", [])
@@ -75,7 +75,7 @@ class ResponseAgent(BaseAgent):
             tables_ids=tables_ids,
             relevant_tables=relevant_tables,
             response_explanation=response_explanation,
-            semantic_elements=semantic_elements,
+            custom_analyses_used=custom_analyses_used,
             candidates=candidates,
         )
         formatted_response = format_response(
@@ -86,14 +86,14 @@ class ResponseAgent(BaseAgent):
         # --- final dict assembly ---
         sql_columns = path_state.get("sql_columns", [])
         sem_ids = []
-        if hasattr(llm_response, "semantic_elements"):
-            sem_ids = get_semantic_entities_ids(llm_response.semantic_elements)
+        if hasattr(llm_response, "custom_analyses_used"):
+            sem_ids = get_custom_analyses_ids(llm_response.custom_analyses_used)
 
         response = {
             "response": formatted_response,
             "sql_code": sql_code,
             "sql_columns": sql_columns,
-            "semantic_elements": sem_ids,
+            "custom_analyses_used": sem_ids,
             "sql_response_from_db": path_state.get("sql_response_from_db"),
         }
 
@@ -116,7 +116,7 @@ class ResponseAgent(BaseAgent):
         tables_ids: list[str],
         relevant_tables: list,
         response_explanation: str,
-        semantic_elements: list,
+        custom_analyses_used: list,
         candidates: list = None,
     ) -> str:
         parts = []
@@ -143,8 +143,8 @@ class ResponseAgent(BaseAgent):
                 else:
                     parts.append(f"• `{table_name}`")
 
-        if semantic_elements and candidates:
-            semantic_items_used = self._format_semantic_elements(semantic_elements, candidates)
+        if custom_analyses_used and candidates:
+            semantic_items_used = self._format_custom_analyses_used(custom_analyses_used, candidates)
             if semantic_items_used:
                 parts.append("")
                 parts.append("**Semantic items used**:")
@@ -163,8 +163,8 @@ class ResponseAgent(BaseAgent):
                     table_info.append({"name": table_name, "id": table_id})
         return table_info
 
-    def _format_semantic_elements(self, semantic_elements: list, candidates: list) -> list[str]:
-        if not semantic_elements or not candidates:
+    def _format_custom_analyses_used(self, custom_analyses_used: list, candidates: list) -> list[str]:
+        if not custom_analyses_used or not candidates:
             return []
 
         candidates_by_id = {}
@@ -181,7 +181,7 @@ class ResponseAgent(BaseAgent):
             return default
 
         formatted_items = []
-        for elem in semantic_elements:
+        for elem in custom_analyses_used:
             elem_id = _get(elem, "id")
             elem_label = _get(elem, "label")
             elem_classification = _get(elem, "classification", False)

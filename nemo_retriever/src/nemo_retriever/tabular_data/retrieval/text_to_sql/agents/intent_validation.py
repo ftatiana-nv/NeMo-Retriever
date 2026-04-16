@@ -150,7 +150,7 @@ class IntentValidationAgent(BaseAgent):
 
         # Get entities from action_input
 
-        required_entities = path_state.get("entities_and_concepts", [])
+        required_entities = path_state.get("entities", [])
 
         if required_entities:
             self.logger.info(f"Validating intent with required entities: {required_entities}")

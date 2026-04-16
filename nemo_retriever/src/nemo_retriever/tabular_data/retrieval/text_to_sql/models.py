@@ -24,17 +24,17 @@ class StrictModel(BaseModel):
 
 
 class ItemScore(BaseModel):
-    """Represents a semantic entity (attribute, metric, or analysis) with classification."""
+    """Represents a custom analysis item with classification."""
 
     id: NonEmptyStr
     label: Literal["custom_analysis", "column", "query", "table"] = Field(
         ...,
-        description="The label of the semantic entity (attribute | metric | analysis)",
+        description="The label of the custom analysis item",
     )
     classification: bool = Field(
         ...,
         description=(
-            "True/False usage classification (True if the semantic entity was used in constructing "
+            "True/False usage classification (True if the custom analysis was used in constructing "
             "the answer - either in SQL code or in deriving the answer from file contents/graph information)"
         ),
     )
@@ -44,7 +44,7 @@ class ItemScore(BaseModel):
 
 NonEmptyItemScoreList = Annotated[
     List[ItemScore],
-    Field(min_length=1, description="Non-empty list of semantic item classifications"),
+    Field(min_length=1, description="Non-empty list of custom analysis classifications"),
 ]
 
 

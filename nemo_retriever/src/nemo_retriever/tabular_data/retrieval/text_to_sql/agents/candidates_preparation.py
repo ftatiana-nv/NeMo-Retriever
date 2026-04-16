@@ -146,18 +146,13 @@ class CandidatePreparationAgent(BaseAgent):
             custom_analyses, key=lambda c: -c.get("score", 0)
         )
 
-        result = []
-        for x in sorted_analyses:
-            preview = self._get_cleaned_sql(x)
-            if preview:
-                result.append(
-                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}, sql_snippet: {preview}"
-                )
-            else:
-                result.append(f"name: {x['name']}, label: {x['label']}, id: {x['id']}")
-        return result
+        return [
+            f"name: {x['name']}, label: {x['label']}, id: {x['id']}"
+            + (f", sql_snippet: {p}" if (p := self._get_sql_preview_from_sql(x)) else "")
+            for x in sorted_analyses
+        ]
 
-    def _get_cleaned_sql(self, candidate: dict) -> str:
+    def _get_sql_preview_from_sql(self, candidate: dict) -> str:
         """
         Build a short, clean SQL preview for prompts.
 

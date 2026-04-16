@@ -10,7 +10,7 @@ Responsibilities:
 - Handle file extraction results (data_for_sql) when present
 - Incorporate similar questions from conversation history
 - Handle feedback scenarios
-- Store SQL response with semantic elements in path_state
+- Store SQL response with custom analyses in path_state
 
 Design Decisions:
 - Primary path: vector/semantic retrieval + preparation, then LLM SQL synthesis
@@ -27,8 +27,8 @@ from langchain_core.messages import AIMessage, SystemMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.llm_invoke import safe_invoke_with_structured_output
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
-    build_semantic_items_section,
-    get_semantic_entities_ids,
+    build_custom_analyses_section,
+    get_custom_analyses_ids,
 )
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
@@ -137,7 +137,7 @@ class SQLFromSemanticAgent(BaseAgent):
     Output:
     - path_state["sql_generation_result"]: SQL response with SQL code or text answer
     - path_state["relevant_tables"]: Relevant tables used
-    - path_state["semantic_elements"]: Semantic entity IDs used
+    - path_state["custom_analyses_used"]: Semantic entity IDs used
     - decision: "constructable" or "unconstructable"
     """
 
@@ -164,7 +164,7 @@ class SQLFromSemanticAgent(BaseAgent):
 
         Returns:
             Dictionary with:
-            - path_state: Contains SQL response, tables, connection, semantic elements
+            - path_state: Contains SQL response, tables, connection, custom analyses
             - messages: Adds SQL response to messages
             - decision: "constructable" or "unconstructable"
         """
@@ -278,21 +278,20 @@ class SQLFromSemanticAgent(BaseAgent):
         has_response = bool(response.response and response.response.strip())
 
         if has_sql:
-            # Extract semantic elements
-            semantic_elements = []
-            if hasattr(response, "semantic_elements") and response.semantic_elements:  # TODO check, fix
-                # Filter semantic elements to keep only those found in candidates
+            custom_analyses_used = []
+            if hasattr(response, "custom_analyses_used") and response.custom_analyses_used:
+                # Filter custom analyses to keep only those found in candidates
                 candidates_ids = {
                     c.get("id") if isinstance(c, dict) else getattr(c, "id", None)
                     for c in path_state["retrieved_candidates"]
                 }
                 filtered_elements = [
                     elem
-                    for elem in response.semantic_elements
+                    for elem in response.custom_analyses_used
                     if (elem.id if hasattr(elem, "id") else elem.get("id")) in candidates_ids
                 ]
-                response.semantic_elements = filtered_elements
-                semantic_elements = get_semantic_entities_ids(response.semantic_elements)
+                response.custom_analyses_used = filtered_elements
+                custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
 
             return {
                 "messages": messages,  # Don't add formatted response here - formatting agent will do it
@@ -300,17 +299,17 @@ class SQLFromSemanticAgent(BaseAgent):
                     **path_state,
                     "sql_generation_result": response,  # Keep as object (Pydantic model)
                     "relevant_tables": relevant_tables if has_sql else [],
-                    "semantic_elements": semantic_elements,
+                    "custom_analyses_used": custom_analyses_used,
                 },
                 "decision": "constructable",
             }
         elif has_response:
-            semantic_elements = []
-            if hasattr(response, "semantic_elements"):
-                response.response += build_semantic_items_section(
-                    response.semantic_elements, path_state["retrieved_candidates"]
+            custom_analyses_used = []
+            if hasattr(response, "custom_analyses_used"):
+                response.response += build_custom_analyses_section(
+                    response.custom_analyses_used, path_state["retrieved_candidates"]
                 )
-                semantic_elements = get_semantic_entities_ids(response.semantic_elements)
+                custom_analyses_used = get_custom_analyses_ids(response.custom_analyses_used)
 
             return {
                 "messages": messages + [AIMessage(content=response.response)],
@@ -318,7 +317,7 @@ class SQLFromSemanticAgent(BaseAgent):
                     **path_state,
                     "sql_generation_result": response,
                     "relevant_tables": relevant_tables if has_sql else [],
-                    "semantic_elements": semantic_elements,
+                    "custom_analyses_used": custom_analyses_used,
                 },
                 "decision": "constructable",
             }

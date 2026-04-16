@@ -61,21 +61,21 @@ class EntitiesExtractionAgent(BaseAgent):
         try:
             extraction_messages = base_messages + [SystemMessage(content=create_entity_extraction_prompt(question))]
             extraction_result = invoke_with_structured_output(llm, extraction_messages, EntitiesExtractionModel)
-            entities_and_concepts = extraction_result.required_entity_name or []
+            entities = extraction_result.required_entity_name or []
 
             path_state["query_no_values"] = extraction_result.query_no_values
-            path_state["entities_and_concepts"] = entities_and_concepts
+            path_state["entities"] = entities
 
             self.logger.info(
                 "Extracted %s entities/concepts from normalized question: %s",
-                len(entities_and_concepts),
-                entities_and_concepts,
+                len(entities),
+                entities,
             )
             return {"path_state": path_state}
 
         except Exception as e:
             self.logger.warning(f"Entity extraction failed: {e}, using fallback values")
             path_state["query_no_values"] = question
-            path_state["entities_and_concepts"] = []
+            path_state["entities"] = []
 
             return {"path_state": path_state}

@@ -475,7 +475,7 @@ def _dedupe_best_score_sort_cap(combined: list[dict]) -> list[dict]:
 
 
 def extract_candidates(
-    entities_and_concepts: list[str],
+    entities: list[str],
     query_no_values: str,
     query_with_values: str = "",
 ) -> tuple[list[dict], list[dict]]:
@@ -494,7 +494,7 @@ def extract_candidates(
         pulls.append(qnv)
     if (qwv := (query_with_values or "").strip()) and qwv != qnv:
         pulls.append(qwv)
-    for ent in entities_and_concepts or []:
+    for ent in entities or []:
         if t := (ent or "").strip():
             pulls.append(t)
 
@@ -529,18 +529,8 @@ def extract_candidates(
     return out_custom, out_columns
 
 
-def get_semantic_entities_ids(items):
-    """
-    Filter semantic items by classification flag and return their IDs.
-
-    Args:
-        items: list of ItemScore objects (or dicts) like
-            [{'id': '...', label: 'custom_analysis', 'classification': true}, ...]
-            or ItemScore(id=..., label=..., classification=True)
-
-    Returns:
-        list of dictionaries with 'id' and 'label' for items where classification is True
-    """
+def get_custom_analyses_ids(items):
+    """Filter custom analyses by classification flag and return their IDs."""
     if not items:
         return []
 
@@ -987,17 +977,8 @@ def get_schemas_slim(relevant_schemas_ids: list = None):
     return all_schemas
 
 
-def build_semantic_items_section(items, candidates):
-    """
-    Build a markdown section listing semantic items that were used.
-
-    Args:
-        items: list of objects or dicts like [{'id': '...', 'classification': True}, ...]
-        candidates: list of objects or dicts with at least {'id': '...', 'name': '...', 'label': '...'}
-
-    Returns:
-        a markdown string starting with 'Semantic items used:' and per-item details, or empty string if no items
-    """
+def build_custom_analyses_section(items, candidates):
+    """Build a markdown section listing custom analyses that were used."""
     if not items:
         return ""
 
