@@ -34,7 +34,7 @@ from deepagents.backends import FilesystemBackend
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore, build_omni_lite_tools
+from nemo_retriever.tabular_data.retrieval.omni_lite.tools import SqlGenerationStore, build_omni_lite_tools
 from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
 
 logger = logging.getLogger(__name__)
@@ -54,17 +54,17 @@ def create_omni_lite_agent(
     payload: AgentPayload,
     retrieval_ctx: RetrievalContext,
     llm: Any | None = None,
-) -> tuple[Any, ExecutionStore]:
+) -> tuple[Any, SqlGenerationStore]:
     """Create a Phase 2 SQL Deep Agent.
 
-    The agent is equipped with a single tool (``validate_sql``) and the
-    ``AGENTS.md`` persistent memory.  The ``RetrievalContext`` from Phase 1 is
-    injected into the system prompt so the agent has full schema context without
-    any retrieval tool-call history in its message thread.
+    The agent is equipped with four tools (``plan_query``, ``generate_sql``,
+    ``validate_sql``, ``fix_sql``) and the ``AGENTS.md`` persistent memory.
+    The ``RetrievalContext`` from Phase 1 is stored in the ``SqlGenerationStore``
+    so tools can access the full schema context without the agent needing to
+    pass it as arguments.
 
     Args:
-        payload: The ``AgentPayload`` from the caller.  Used to bind
-            session-scoped values (``dialects``) to ``validate_sql``.
+        payload: The ``AgentPayload`` from the caller.
         retrieval_ctx: The ``RetrievalContext`` produced by Phase 1.
         llm: Optional pre-built LLM client.  When ``None``, ``_make_llm()`` is
             called automatically.
@@ -72,13 +72,13 @@ def create_omni_lite_agent(
     Returns:
         Tuple of (agent, store):
         - agent: Deep Agent instance ready for ``agent.invoke()``.
-        - store: ``ExecutionStore`` populated in-place as the agent runs.
+        - store: ``SqlGenerationStore`` populated in-place as the agent runs.
           ``store.sql`` holds the last validated SQL.
     """
     if llm is None:
         llm = _make_llm()
 
-    tools, store = build_omni_lite_tools(payload, llm)
+    tools, store = build_omni_lite_tools(payload, llm, retrieval_ctx=retrieval_ctx)
 
     skill_dirs = _load_skill_dirs()
     agents_md = str(_BASE_DIR / "AGENTS.md")
@@ -119,11 +119,11 @@ def _load_skill_dirs() -> list[str]:
 
 
 def _build_system_prompt(payload: AgentPayload, retrieval_ctx: RetrievalContext) -> str:
-    """Build the system prompt that injects the RetrievalContext for Phase 2.
+    """Build the system prompt for the Phase 2 SQL Deep Agent.
 
-    The RetrievalContext is serialised as JSON and embedded in the system
-    prompt so the agent has full schema context from the start, without
-    accumulating retrieval tool-call history in the message thread.
+    The full RetrievalContext is stored in the ``SqlGenerationStore`` and
+    accessed by the tools directly — the system prompt carries only a brief
+    orientation so the agent knows its role and the allowed dialects.
     """
     now = datetime.now()
     dialects = payload.get("dialects") or []
@@ -136,29 +136,24 @@ def _build_system_prompt(payload: AgentPayload, retrieval_ctx: RetrievalContext)
         lines.append(f"Allowed SQL dialects: {', '.join(str(d) for d in dialects)}.")
 
     lines.append("")
-    lines.append("## RetrievalContext (produced by Phase 1 — use this as your schema source)")
-    lines.append("")
-
-    # Embed the full context as JSON for the agent to reference
-    try:
-        ctx_json = json.dumps(retrieval_ctx, default=str, indent=2)
-    except Exception:
-        ctx_json = "{}"
-    lines.append(ctx_json)
-
-    lines.append("")
     lines.append(
-        "The RetrievalContext above contains all the tables, columns, foreign keys, "
-        "and SQL snippets you need.  Do NOT call any retrieval tools — retrieval is "
-        "complete.  Your only tool is `validate_sql`.  Generate SQL from the context "
-        "above, then call `validate_sql` immediately.  Fix and retry up to 4 times."
+        "You are the SQL Deep Agent (Phase 2).  Phase 1 has already retrieved the schema "
+        "context — it is available to your tools via the store.  "
+        "Call tools in order: plan_query → generate_sql → validate_sql → fix_sql (if needed)."
     )
+
+    entities = retrieval_ctx.get("entity_coverage") or []
+    if entities:
+        lines.append("")
+        lines.append("Entities resolved by Phase 1:")
+        for ec in entities:
+            expr = f"  sql_expression={ec['sql_expression']}" if ec.get("sql_expression") else ""
+            lines.append(f"  - {ec['entity']} ({ec['entity_type']}, resolved_as={ec['resolved_as']}){expr}")
 
     if not retrieval_ctx.get("coverage_complete"):
         lines.append(
-            "\nNote: `coverage_complete` is false — one or more entities could not be "
-            "fully resolved.  Construct the best SQL possible from the available context "
-            "and note any limitations in your `answer` field."
+            "\nNote: coverage_complete=false — one or more entities were unresolved by Phase 1. "
+            "Construct the best SQL possible and note limitations in your final answer."
         )
 
     return "\n".join(lines)
@@ -203,14 +198,17 @@ def format_omni_lite_user_prompt(
     parts.append(f"User question: {question.strip()}")
     parts.append("")
     parts.append(
-        "Your RetrievalContext is in the system prompt above.\n"
-        "Step 1 — Generate SQL using the tables, columns, FKs, and snippets from RetrievalContext.\n"
-        "Step 2 — Call validate_sql immediately (wrap SQL in ```sql ... ``` fences).\n"
-        "Step 3 — If invalid, fix the SQL and call validate_sql again (up to 4 retries).\n"
-        "Step 4 — Emit your final answer as a single JSON object (no other text):\n"
-        '  {"sql_code": "<exact SQL>", "answer": "<short explanation>", '
-        '"result": null, "semantic_elements": []}\n'
-        "Nothing before { or after }. No markdown fences. No apologies."
+        "Follow these steps exactly:\n\n"
+        "Step 1 — call plan_query() to produce a structured query plan.\n\n"
+        "Step 2 — call generate_sql() to write SQL from the plan.\n\n"
+        "Step 3 — call validate_sql() to validate the SQL.\n"
+        "  If result.valid is false, proceed to Step 4.\n"
+        "  If result.valid is true, proceed to Step 5.\n\n"
+        "Step 4 — call fix_sql(error=<exact error from Step 3>), then call validate_sql() again.\n"
+        "  Repeat up to 4 times total.  After 4 failures proceed to Step 5 with best SQL.\n\n"
+        "Step 5 — emit your final answer as a single JSON object (nothing before { or after }):\n"
+        '  {"sql_code": "<validated SQL>", "answer": "<1-3 sentence explanation>", '
+        '"result": null, "semantic_elements": []}'
     )
     return "\n".join(parts)
 

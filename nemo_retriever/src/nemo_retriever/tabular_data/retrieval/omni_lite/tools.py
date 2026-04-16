@@ -1,16 +1,17 @@
 """LangChain tools for the Phase 2 SQL Deep Agent.
 
-Phase 2 receives a pre-built ``RetrievalContext`` from Phase 1 and only needs
-to generate SQL and validate it.  Retrieval tools and the execute_sql tool
-have been removed:
-- Retrieval (``extract_entities``, ``retrieve_semantic_candidates``) is now
-  handled entirely by Phase 1 (``retrieval_agent_runtime.py``).
-- Execution is now a plain Python function in ``main.py`` (Phase 3).
+State is accumulated in a ``SqlGenerationStore`` — the same pattern as
+``RetrievalStore`` in Phase 1.  Tools read/write the store; the agent never
+needs to pass SQL strings or plans between calls.
 
-Factory
--------
-Use ``build_omni_lite_tools(payload, llm)`` to get a list of bound tools and
-an ``ExecutionStore`` for the session.
+Tools
+-----
+- ``plan_query``   — Step 1: produce a structured query plan from the RetrievalContext
+- ``generate_sql`` — Step 2: write SQL from the plan
+- ``validate_sql`` — Step 3: validate SQL (reads ``store.draft_sql``)
+- ``fix_sql``      — Step 4 (conditional): targeted fix on validation error
+
+Use ``build_omni_lite_tools(payload, llm)`` → ``(tools, store)``.
 """
 
 from __future__ import annotations
@@ -19,29 +20,42 @@ import json
 import logging
 from typing import Any
 
+from langchain_core.messages import SystemMessage
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.agents.query_validation import (
     query_validation,
 )
+from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Execution store
+# SqlGenerationStore
 # ---------------------------------------------------------------------------
 
 
-class ExecutionStore:
-    """Mutable per-request store written by ``validate_sql``, read by Phase 3.
+class SqlGenerationStore:
+    """Mutable per-request store written by the SQL generation tools, read by Phase 3.
 
-    ``validate_sql`` writes the last SQL that passed validation.
-    ``sql`` is ``None`` until validation succeeds.
+    Mirrors the ``RetrievalStore`` pattern from Phase 1:
+    - ``plan_query``   writes to ``plan``.
+    - ``generate_sql`` writes to ``draft_sql``.
+    - ``validate_sql`` writes to ``sql`` on success.
+    - ``fix_sql``      overwrites ``draft_sql`` with the corrected version.
+
+    ``main.py`` reads ``store.sql`` (the last validated SQL) for Phase 3 execution.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, question: str, retrieval_ctx: RetrievalContext) -> None:
+        self.question: str = question
+        self.retrieval_ctx: RetrievalContext = retrieval_ctx
+        self.plan: dict | None = None
+        self.draft_sql: str | None = None
         self.sql: str | None = None
 
     def as_answer(self) -> dict | None:
@@ -57,23 +71,89 @@ class ExecutionStore:
 
 
 # ---------------------------------------------------------------------------
+# Pydantic schemas
+# ---------------------------------------------------------------------------
+
+
+class _QueryPlan(BaseModel):
+    tables_to_use: list[str] = Field(
+        ...,
+        description=(
+            "Exact table names (from relevant_tables in the RetrievalContext) needed to answer "
+            "the question.  Include only tables that contribute a SELECT column, a WHERE "
+            "condition, or a required JOIN leg."
+        ),
+    )
+    join_conditions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "FK-based JOIN conditions in the form 'alias1.col = alias2.col'. "
+            "Use ONLY foreign keys from relevant_fks.  Never invent joins."
+        ),
+    )
+    select_expressions: list[str] = Field(
+        ...,
+        description=(
+            "Exactly what to put in the SELECT clause: column references "
+            "(alias.column), aggregation expressions (SUM(alias.col)), "
+            "or sql_expression fragments from entity_coverage."
+        ),
+    )
+    where_conditions: list[str] = Field(
+        default_factory=list,
+        description="WHERE predicates, e.g. \"s.city = 'Seattle'\".",
+    )
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Columns/expressions for GROUP BY.",
+    )
+    order_by: list[str] = Field(
+        default_factory=list,
+        description="Columns/expressions for ORDER BY (include ASC/DESC).",
+    )
+    use_cte: bool = Field(
+        default=False,
+        description="True if CTEs improve clarity or are needed for multi-step logic.",
+    )
+    cte_descriptions: list[str] = Field(
+        default_factory=list,
+        description="One plain-English description per CTE (only when use_cte=True).",
+    )
+    notes: str = Field(
+        default="",
+        description="Any special considerations: dialect quirks, missing coverage, etc.",
+    )
+
+
+class _GeneratedSQL(BaseModel):
+    sql: str = Field(
+        ...,
+        description=(
+            "Complete, fully-qualified SELECT statement following the query plan. "
+            "Every table must be SCHEMA.TABLE AS alias; every column must be alias.column. "
+            "No markdown fences, no comments inside the SQL."
+        ),
+    )
+
+
+class _FixedSQL(BaseModel):
+    sql: str = Field(
+        ...,
+        description="The corrected SQL statement.  Must differ from the failing SQL.",
+    )
+    changes_summary: str = Field(
+        ...,
+        description="One sentence describing what was changed and why.",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
 def _strip_sql_fences(sql: str) -> str:
-    """Strip markdown code fences from a SQL string.
-
-    The agent is instructed to wrap SQL in triple-backtick fences
-    (````sql ... ```) to prevent double-quote characters from breaking
-    the JSON tool-call payload.  This helper removes those fences so the
-    underlying validation layer always receives plain SQL.
-
-    Handles:
-    - ````sql\\n...\\n```` (language tag)
-    - ` ``` \\n...\\n``` ` (no language tag)
-    - Plain SQL with no fences (returned unchanged)
-    """
+    """Strip markdown code fences from a SQL string (kept for backward compat)."""
     stripped = sql.strip()
     if stripped.startswith("```"):
         lines = stripped.splitlines()
@@ -83,26 +163,193 @@ def _strip_sql_fences(sql: str) -> str:
     return sql
 
 
+def _compact_schema(retrieval_ctx: RetrievalContext) -> str:
+    """Return a compact schema summary for LLM prompts."""
+    lines: list[str] = []
+    for t in retrieval_ctx.get("relevant_tables") or []:
+        name = t.get("name") or ""
+        schema = t.get("schema") or ""
+        fqn = f"{schema}.{name}" if schema else name
+        cols = []
+        for col in t.get("columns") or []:
+            if isinstance(col, dict):
+                cols.append(col.get("name") or "")
+            elif isinstance(col, str):
+                cols.append(col)
+        lines.append(f"  {fqn}: [{', '.join(c for c in cols if c)}]")
+    return "\n".join(lines) if lines else "  (no tables)"
+
+
 # ---------------------------------------------------------------------------
-# Tool — validate_sql
+# Tool 1 — plan_query
 # ---------------------------------------------------------------------------
 
 
-def _make_validate_sql_tool(dialects: list[str] | None, store: ExecutionStore):
+def _make_plan_query_tool(store: SqlGenerationStore, llm: Any):
+    """Return a ``plan_query`` tool that reads the store and writes ``store.plan``."""
+
+    @tool
+    def plan_query() -> str:
+        """Plan the SQL query structure from the RetrievalContext.
+
+        Call this as the FIRST step.  The tool reads the question and the full
+        RetrievalContext from the store automatically — no arguments needed.
+
+        Produces a structured query plan (tables, joins, select expressions,
+        WHERE conditions, GROUP BY, ORDER BY, CTE flag) and stores it
+        internally for generate_sql to consume.
+
+        Returns:
+            A summary of the query plan.
+        """
+        ctx = store.retrieval_ctx
+        entity_lines = []
+        for ec in ctx.get("entity_coverage") or []:
+            expr = f" → sql_expression: {ec['sql_expression']}" if ec.get("sql_expression") else ""
+            entity_lines.append(f"  - {ec['entity']} ({ec['entity_type']}, resolved_as={ec['resolved_as']}){expr}")
+
+        fk_lines = []
+        for fk in ctx.get("relevant_fks") or []:
+            fk_lines.append(
+                f"  - {fk.get('from_table')}.{fk.get('from_column')} → " f"{fk.get('to_table')}.{fk.get('to_column')}"
+            )
+
+        snippets = "\n".join(ctx.get("complex_candidates_str") or []) or "  (none)"
+
+        prompt = f"""You are planning a SQL query from a pre-analyzed database context.
+
+User question: "{store.question}"
+
+Entities identified:
+{chr(10).join(entity_lines) or "  (none)"}
+
+Available tables (schema.table: [columns]):
+{_compact_schema(ctx)}
+
+Foreign-key relationships (use ONLY these for JOINs):
+{chr(10).join(fk_lines) or "  (none)"}
+
+Certified SQL snippets / custom analyses (highest-priority reference):
+{snippets}
+
+coverage_complete: {ctx.get('coverage_complete', False)}
+
+Rules:
+- Use ONLY tables listed above.  Never reference unlisted tables.
+- For entities with resolved_as="expression", embed their sql_expression directly.
+- If coverage_complete=false, note which entity is unresolved in the notes field.
+- Prefer certified SQL snippets as structural references when available.
+
+Produce a structured query plan."""
+
+        messages = [SystemMessage(content=prompt)]
+        result = invoke_with_structured_output(llm, messages, _QueryPlan)
+
+        if result is None:
+            return "plan_query: LLM call failed — no plan produced."
+
+        store.plan = result.model_dump()
+        summary_lines = [
+            "Query plan ready:",
+            f"  tables: {result.tables_to_use}",
+            f"  joins: {result.join_conditions}",
+            f"  select: {result.select_expressions}",
+            f"  where: {result.where_conditions}",
+            f"  group_by: {result.group_by}",
+            f"  order_by: {result.order_by}",
+            f"  use_cte: {result.use_cte}",
+        ]
+        if result.notes:
+            summary_lines.append(f"  notes: {result.notes}")
+        return "\n".join(summary_lines)
+
+    return plan_query
+
+
+# ---------------------------------------------------------------------------
+# Tool 2 — generate_sql
+# ---------------------------------------------------------------------------
+
+
+def _make_generate_sql_tool(store: SqlGenerationStore, llm: Any):
+    """Return a ``generate_sql`` tool that reads ``store.plan`` and writes ``store.draft_sql``."""
+
+    @tool
+    def generate_sql() -> str:
+        """Generate SQL from the query plan.
+
+        Call this AFTER plan_query.  The tool reads the plan and the full
+        table schema from the store — no arguments needed.
+
+        Writes the generated SQL to the store for validate_sql to consume.
+
+        Returns:
+            The generated SQL string (also stored internally).
+        """
+        if store.plan is None:
+            return "generate_sql: no plan in store — call plan_query first."
+
+        plan = store.plan
+        ctx = store.retrieval_ctx
+
+        prompt = f"""You are writing a SQL query from a structured plan.
+
+User question: "{store.question}"
+
+Query plan:
+{json.dumps(plan, indent=2)}
+
+Full table schema (schema.table: [columns]):
+{_compact_schema(ctx)}
+
+Foreign keys:
+{json.dumps(ctx.get('relevant_fks') or [], indent=2)}
+
+MANDATORY RULES — every violation causes a validation failure:
+1. Every table MUST be written as SCHEMA.TABLE AS alias.
+2. Every column MUST be prefixed with its alias: alias.column.
+3. Every alias in SELECT/WHERE/GROUP BY/ORDER BY MUST be defined in FROM/JOIN.
+4. Use ONLY tables from the plan's tables_to_use list.
+5. Use ONLY FK conditions listed in the plan for JOIN predicates.
+6. For entities with a sql_expression in the plan, embed that expression directly.
+7. String literals MUST use single quotes.  Never use double quotes for values.
+8. No SQL comments.  No markdown fences.
+9. SELECT-only — no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE.
+
+Write the complete SQL query."""
+
+        messages = [SystemMessage(content=prompt)]
+        result = invoke_with_structured_output(llm, messages, _GeneratedSQL)
+
+        if result is None or not result.sql.strip():
+            return "generate_sql: LLM call failed — no SQL produced."
+
+        store.draft_sql = result.sql.strip()
+        return store.draft_sql
+
+    return generate_sql
+
+
+# ---------------------------------------------------------------------------
+# Tool 3 — validate_sql
+# ---------------------------------------------------------------------------
+
+
+def _make_validate_sql_tool(dialects: list[str] | None, store: SqlGenerationStore):
     """Return a ``validate_sql`` tool bound to *dialects* and *store*."""
 
     _dialects = dialects or []
 
     @tool
-    def validate_sql(sql: str) -> str:
-        """Validate a SQL query for schema correctness and SELECT-only enforcement.
+    def validate_sql() -> str:
+        """Validate the current draft SQL for schema correctness and SELECT-only enforcement.
 
-        Call this AFTER generating SQL.  Fix and retry up to 4 times if invalid.
+        Call this AFTER generate_sql (or fix_sql).  Reads the SQL from the store
+        automatically — no argument needed.
 
-        Args:
-            sql: The SQL string to validate.  May be wrapped in triple-backtick
-                markdown fences (``\\`\\`\\`sql ... \\`\\`\\``); fences are stripped
-                automatically before validation.
+        If valid, the SQL is saved internally as the final validated result.
+        If invalid, call fix_sql with the returned error, then call validate_sql again.
+        Retry up to 4 times total.
 
         Returns:
             JSON object with:
@@ -110,6 +357,12 @@ def _make_validate_sql_tool(dialects: list[str] | None, store: ExecutionStore):
               - ``error``: error message string (empty when valid)
               - ``sql_columns``: list of column IDs referenced by the query
         """
+        sql = store.draft_sql
+        if not sql:
+            return json.dumps(
+                {"valid": False, "error": "No SQL in store — call generate_sql first.", "sql_columns": []}
+            )
+
         sql = _strip_sql_fences(sql)
         try:
             result = query_validation(None, sql, _dialects, user_participants=[])
@@ -137,34 +390,117 @@ def _make_validate_sql_tool(dialects: list[str] | None, store: ExecutionStore):
 
 
 # ---------------------------------------------------------------------------
+# Tool 4 — fix_sql
+# ---------------------------------------------------------------------------
+
+
+def _make_fix_sql_tool(store: SqlGenerationStore, llm: Any):
+    """Return a ``fix_sql`` tool that reads ``store.draft_sql`` and overwrites it with a fix."""
+
+    @tool
+    def fix_sql(error: str) -> str:
+        """Fix the current draft SQL based on a validation error.
+
+        Call this when validate_sql returns valid=false.
+        Pass the exact error string from the validate_sql result.
+        The tool reads the current draft SQL from the store, applies a targeted
+        fix, and writes the corrected SQL back to the store.
+        Then call validate_sql again.
+
+        Args:
+            error: The exact error message returned by validate_sql.
+
+        Returns:
+            The corrected SQL string (also stored internally for the next validate_sql call).
+        """
+        if not store.draft_sql:
+            return "fix_sql: no draft SQL in store — call generate_sql first."
+
+        hint = ""
+        if "unknown column name" in error.lower() and "in table" in error.lower():
+            hint = (
+                "\nHINT: 'Unknown column name in table' usually means you used the right table "
+                "name but from the wrong schema.  Check if the same table exists under a "
+                "different schema in the available schema list, or remove the column."
+            )
+
+        prompt = f"""You are fixing a SQL query that failed validation.
+
+User question: "{store.question}"
+
+Failing SQL:
+{store.draft_sql}
+
+Validation error:
+{error}{hint}
+
+Available schema (schema.table: [columns]):
+{_compact_schema(store.retrieval_ctx)}
+
+Rules:
+- Fix ONLY what the error describes.  Do not rewrite unrelated parts.
+- Fully-qualified identifiers (SCHEMA.TABLE AS alias, alias.column) are mandatory.
+- String literals MUST use single quotes.
+- Return a corrected SQL that is different from the failing SQL.
+- No markdown fences, no comments."""
+
+        messages = [SystemMessage(content=prompt)]
+        result = invoke_with_structured_output(llm, messages, _FixedSQL)
+
+        if result is None or not result.sql.strip():
+            return "fix_sql: LLM call failed — draft SQL unchanged."
+
+        store.draft_sql = result.sql.strip()
+        return f"Fixed SQL ({result.changes_summary}):\n{store.draft_sql}"
+
+    return fix_sql
+
+
+# ---------------------------------------------------------------------------
 # Public factory
 # ---------------------------------------------------------------------------
 
 
-def build_omni_lite_tools(payload: AgentPayload, llm: Any) -> tuple[list, ExecutionStore]:
-    """Build and return the list of Phase 2 SQL Agent tools and a shared ``ExecutionStore``.
+def build_omni_lite_tools(
+    payload: AgentPayload, llm: Any, retrieval_ctx: RetrievalContext | None = None
+) -> tuple[list, SqlGenerationStore]:
+    """Build and return Phase 2 SQL Agent tools and a shared ``SqlGenerationStore``.
 
-    Phase 2 only needs ``validate_sql``.  Retrieval tools have moved to Phase 1
-    (``retrieval_tools.py``) and SQL execution has moved to Phase 3 (plain
-    function in ``main.py``).
+    Tools close over the store so all state is accumulated automatically as
+    the agent calls them — no SQL strings or plans pass between tool calls.
 
     Args:
         payload: The ``AgentPayload`` from the caller.
-        llm: The LLM client (unused at tool construction time; reserved for
-            future LLM-assisted validation).
+        llm: The LLM client used by ``plan_query``, ``generate_sql``, and ``fix_sql``.
+        retrieval_ctx: The ``RetrievalContext`` from Phase 1.  When ``None``,
+            an empty context is used (safe fallback).
 
     Returns:
-        A tuple of:
-        - ``[validate_sql]`` — list containing the single Phase 2 tool.
-        - ``ExecutionStore`` instance populated by ``validate_sql`` as the
-          agent runs.
+        ``(tools, store)`` — tools list and the ``SqlGenerationStore`` that will
+        be populated as the agent runs.
     """
     dialects = payload.get("dialects") or []
-    store = ExecutionStore()
+    question = payload.get("question") or ""
+    ctx: RetrievalContext = retrieval_ctx or {
+        "entity_coverage": [],
+        "relevant_tables": [],
+        "relevant_fks": [],
+        "complex_candidates_str": [],
+        "relevant_queries": [],
+        "coverage_complete": False,
+    }
+
+    store = SqlGenerationStore(question=question, retrieval_ctx=ctx)
 
     return [
+        _make_plan_query_tool(store, llm),
+        _make_generate_sql_tool(store, llm),
         _make_validate_sql_tool(dialects, store),
+        _make_fix_sql_tool(store, llm),
     ], store
 
 
-__all__ = ["build_omni_lite_tools", "ExecutionStore", "_strip_sql_fences"]
+# Keep ExecutionStore as a thin alias so any existing imports don't break
+ExecutionStore = SqlGenerationStore
+
+__all__ = ["build_omni_lite_tools", "SqlGenerationStore", "ExecutionStore", "_strip_sql_fences"]
