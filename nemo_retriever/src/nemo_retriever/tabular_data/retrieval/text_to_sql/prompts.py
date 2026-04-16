@@ -1,55 +1,10 @@
 main_system_prompt_template = (
+    "{custom_prompts}"
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
-    "Ontology: {ontology_prompt}\n\n"
+    "{acronyms}"
     "SQL dialect: {dialect}"
 )
-
-ONTOLOGY = {
-    "industry": [],
-    "dictionary": [
-        {
-            "name": "Brand",
-            "description": (
-                "identifies the specific brand associated with a "
-                "product. use WAREHOUSE.STOCKITEMS_ARCHIVE.BRAND. "
-                "example of a brand: 'Northwind'"
-            ),
-        },
-        {
-            "name": "sold items",
-            "description": (
-                "When asking about sold items, use the invoice "
-                "attribute and not orders. Invoice has details "
-                "about the items inside an order. while order "
-                "table includes summary and totals of the order "
-                "like how many items, total price etc, but "
-                "doesn't include info about the items themselves."
-            ),
-        },
-        {
-            "name": "purchased items with discount",
-            "description": "Use Sales.Orders",
-        },
-        {
-            "name": "best selling products with filters",
-            "description": ("Do NOT use REPORTS.MV_TOPSELLINGPRODUCTS. " "Use REPORTS.TOP_SELLING_PRODUCTS"),
-        },
-        {
-            "name": "deals and discounts",
-            "description": "Use SALES.SPECIALDEALS",
-        },
-        {
-            "name": "transactions",
-            "description": (
-                "When asking about transactions in general or "
-                "specifically about successful transactions "
-                "(and not unfinished ones) - include the "
-                "isFinalized filter."
-            ),
-        },
-    ],
-}
 
 
 # User prompt template for SQL generation
@@ -160,31 +115,6 @@ create_sql_user_prompt = (
     "- If any check fails: fix up to 3 times internally, "
     "then output.\n"
 )
-
-
-def get_ontology_prompt(ontology):
-    if not ontology:
-        return ""
-
-    ontology_prompt = ""
-
-    company_overview = ontology.get("overview", "")
-    if company_overview:
-        ontology_prompt += f"Company overview: {company_overview}\n"
-
-    industry_list = ontology.get("industry", [])
-    if len(industry_list) > 0:
-        industry_label = "industry" if len(industry_list) == 1 else "industries"
-        industries = ", ".join(industry_list)
-        ontology_prompt += f"within the context of the {industries} {industry_label}\n"
-
-    definitions_list = ontology.get("dictionary", [])
-    if len(definitions_list) > 0:
-        ontology_prompt += "Here are the relevant industry definitions:\n"
-        dictionary_items = [f"{item['name']}: {item['description']}" for item in definitions_list]
-        ontology_prompt += "\n".join(dictionary_items)
-
-    return ontology_prompt + "\n"
 
 
 def create_sql_from_candidates_prompt(custom_analyses: list) -> str:

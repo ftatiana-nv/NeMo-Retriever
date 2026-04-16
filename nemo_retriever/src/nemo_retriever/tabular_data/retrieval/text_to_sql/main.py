@@ -1,14 +1,12 @@
 import logging
+import time
 from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload, AgentState
-from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
-    main_system_prompt_template,
-    ONTOLOGY,
-    get_ontology_prompt,
-)
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import main_system_prompt_template
+from nemo_retriever.tabular_data.retrieval.text_to_sql.config import load_acronyms, load_custom_prompts
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import _make_llm
 
 logger = logging.getLogger(__name__)
@@ -24,10 +22,18 @@ app = graph.compile()
 
 
 def get_agent_response(payload: AgentPayload):
+    t0 = time.perf_counter()
     now = datetime.now()
+    acronyms = load_acronyms()
+    custom_prompts = load_custom_prompts()
+
+    acronyms_text = f"Acronyms:\n{acronyms}\n\n" if acronyms else ""
+    custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
+
     main_system_prompt = main_system_prompt_template.format(
         date=now,
-        ontology_prompt=get_ontology_prompt(ONTOLOGY),
+        acronyms=acronyms_text,
+        custom_prompts=custom_prompts_text,
         dialect=payload.get("dialect"),
     )
     messages = [
@@ -80,7 +86,9 @@ def get_agent_response(payload: AgentPayload):
     else:
         answer = {"response": str(final_response)}
 
-    logger.info("Final answer to user:\n%s", answer)
+    elapsed = time.perf_counter() - t0
+    answer["runtime_seconds"] = round(elapsed, 2)
+    logger.info("Final answer to user (%.2fs):\n%s", elapsed, answer)
     return answer
 
 
