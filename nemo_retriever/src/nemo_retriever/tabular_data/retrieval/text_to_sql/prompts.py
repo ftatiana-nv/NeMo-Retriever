@@ -187,7 +187,7 @@ def get_ontology_prompt(ontology):
     return ontology_prompt + "\n"
 
 
-def create_sql_from_semantic_prompt(complex_candidates: list) -> str:
+def create_sql_from_semantic_prompt(custom_analyses: list) -> str:
     """
     System prompt for SQL generation from semantic retrieval (custom analyses, columns, etc.).
 

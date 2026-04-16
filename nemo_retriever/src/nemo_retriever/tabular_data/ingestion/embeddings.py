@@ -4,7 +4,6 @@
 
 from typing import List
 
-from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import Labels
 import pandas as pd
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
@@ -39,8 +38,11 @@ def query_neo4j_tables_for_embedding() -> List[dict]:
 def query_neo4j_columns_for_embedding() -> List[dict]:
     """Return one doc per ``Column`` node for embedding (distinct from table-level rows)."""
     neo4j_conn = get_neo4j_conn()
-    query = """MATCH (d:Database)-[:CONTAINS]->(s:Schema)-[:CONTAINS]->(t:Table)-[:CONTAINS]->(c:Column)
-               RETURN collect({
+    query = f"""
+               MATCH (d:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+               -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+               -[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+               RETURN collect({{
                  text: "db_name: " + d.name + ", schema_name: " + s.name +
                    ", table_name: " + t.name + ", column_name: " + c.name +
                    ", data_type: " + coalesce(toString(c.data_type), "") +
@@ -49,7 +51,7 @@ def query_neo4j_columns_for_embedding() -> List[dict]:
                  name: c.name,
                  label: labels(c)[0],
                  id: c.id
-               }) as docs
+               }}) as docs
             """
     result = neo4j_conn.query_read(query, parameters={})
     if not result:

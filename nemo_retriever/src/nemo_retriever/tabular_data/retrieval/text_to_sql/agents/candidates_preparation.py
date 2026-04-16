@@ -30,11 +30,20 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     _apply_foreign_key_hints,
     dedupe_merge_relevant_tables,
     get_relevant_fks_from_candidates_tables,
-    get_relevant_queries,
     get_relevant_tables,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_relevant_queries(candidates: list) -> list[str]:
+    queries = []
+    for candidate in candidates:
+        if candidate.get("label", "") == Labels.CUSTOM_ANALYSIS:
+            sql = (candidate.get("sql") or "").strip()
+            if sql and sql not in queries:
+                queries.append(sql)
+    return queries
 
 
 class CandidatePreparationAgent(BaseAgent):
@@ -54,8 +63,8 @@ class CandidatePreparationAgent(BaseAgent):
     - path_state["relevant_fks"]: Flat list of FK relationship dicts
     - path_state["relevant_queries"]: Relevant queries for context
     - path_state["similar_questions"]: Similar questions from history
-    - path_state["complex_candidates"]: Filtered complex candidates
-    - path_state["complex_candidates_str"]: String representation for prompts
+    - path_state["custom_analyses"]: Filtered complex candidates
+    - path_state["custom_analyses_str"]: String representation for prompts
     """
 
     def __init__(self):
@@ -105,26 +114,19 @@ class CandidatePreparationAgent(BaseAgent):
 
         self.logger.info(f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys")
 
-        relevant_queries = get_relevant_queries(
+        relevant_queries = _get_relevant_queries(
             candidates,
         )
         self.logger.info(f"Found {len(relevant_queries)} relevant queries")
 
-        complex_candidates = [
-            {
-                "name": x["name"],
-                "sql": x.get("sql") or "",
-                "label": x["label"],
-                "description": x.get("description") or "",
-            }
-            for x in candidates
+        custom_analyses = [
+            x for x in candidates
             if x.get("label") == Labels.CUSTOM_ANALYSIS
         ]
-        self.logger.info(f"Filtered {len(complex_candidates)} complex candidates")
+        self.logger.info(f"Filtered {len(custom_analyses)} custom analyses")
 
-        # Build string representation of complex candidates for prompts
-        complex_candidates_str = self._build_complex_candidates_str(candidates)
-        self.logger.info(f"Built string representation with {len(complex_candidates_str)} entries")
+        custom_analyses_str = self._build_custom_analyses_str(custom_analyses)
+        self.logger.info(f"Built string representation with {len(custom_analyses_str)} entries")
 
         # Store all prepared data in path_state
         return {
@@ -133,44 +135,27 @@ class CandidatePreparationAgent(BaseAgent):
                 "relevant_tables": relevant_tables,
                 "relevant_fks": relevant_fks,
                 "relevant_queries": relevant_queries,
-                "complex_candidates": complex_candidates,
-                "complex_candidates_str": complex_candidates_str,
+                "custom_analyses": custom_analyses,
+                "custom_analyses_str": custom_analyses_str,
             }
         }
 
-    def _build_complex_candidates_str(self, candidates: list) -> list[str]:
-        """
-        Build string representation of complex candidates for prompts.
+    def _build_custom_analyses_str(self, custom_analyses: list) -> list[str]:
+        """Build string representation of custom analyses for prompts."""
+        sorted_analyses = sorted(
+            custom_analyses, key=lambda c: -c.get("score", 0)
+        )
 
-        Prioritizes certified candidates by sorting them first and including
-        certification status in the string representation.
-
-        Args:
-            candidates: List of all candidates
-
-        Returns:
-            List of formatted candidate strings (certified ones first)
-        """
-        complex_candidates = []
-        for x in candidates:
-            if x.get("label") == Labels.CUSTOM_ANALYSIS:
-                complex_candidates.append(x)
-
-        def sort_key(candidate):
-            return -candidate.get("score", 0)
-
-        complex_candidates.sort(key=sort_key)
-
-        complex_candidates_str = []
-        for x in complex_candidates:
+        result = []
+        for x in sorted_analyses:
             preview = self._get_cleaned_sql(x)
             if preview:
-                complex_candidates_str.append(
+                result.append(
                     f"name: {x['name']}, label: {x['label']}, id: {x['id']}, sql_snippet: {preview}"
                 )
             else:
-                complex_candidates_str.append(f"name: {x['name']}, label: {x['label']}, id: {x['id']}")
-        return complex_candidates_str
+                result.append(f"name: {x['name']}, label: {x['label']}, id: {x['id']}")
+        return result
 
     def _get_cleaned_sql(self, candidate: dict) -> str:
         """

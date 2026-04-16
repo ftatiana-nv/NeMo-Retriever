@@ -179,8 +179,8 @@ class SQLFromSemanticAgent(BaseAgent):
         relevant_fks = path_state.get("relevant_fks", [])
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])
-        complex_candidates = path_state.get("complex_candidates", [])
-        complex_candidates_str = path_state.get("complex_candidates_str", [])
+        custom_analyses = path_state.get("custom_analyses", [])
+        custom_analyses_str = path_state.get("custom_analyses_str", [])
 
         # Format similar questions for prompt
         similar_questions_txt = "\n".join(f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions)
@@ -193,7 +193,7 @@ class SQLFromSemanticAgent(BaseAgent):
             Includes semantic candidate context, FKs, similar questions, and optionally
             extracted file data or file excerpts.
             """
-            observation_block = f"\nlist of important semantic entities with sql snippets:\n{complex_candidates_str}\n"
+            observation_block = f"\nlist of important semantic entities with sql snippets:\n{custom_analyses_str}\n"
 
             # Build user prompt with formatted tables
             user_prompt = create_sql_user_prompt.format(
@@ -210,7 +210,7 @@ class SQLFromSemanticAgent(BaseAgent):
 
             # Choose system prompt based on context
 
-            system_prompt = create_sql_from_semantic_prompt(complex_candidates)
+            system_prompt = create_sql_from_semantic_prompt(custom_analyses)
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),

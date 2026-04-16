@@ -1027,19 +1027,6 @@ def build_semantic_items_section(items, candidates):
     return "\n\n**Semantic items used**:\n" + "\n".join(matched_lines)
 
 
-def get_relevant_queries(candidates):  # TODO: check
-    snippet_queries = []
-    for candidate in candidates:
-        if candidate.get("label", "") == "custom_analysis":
-            analysis_sql = candidate.get("sql", [])
-            # Check if sql list is not empty before accessing index 0
-            if not analysis_sql:
-                continue
-            s_query = analysis_sql[0].get("sql_code", "")  # analysis can't be without sql, one sql? [0]?
-            if s_query and s_query not in snippet_queries:
-                snippet_queries.append(s_query)
-    return snippet_queries
-
 
 def _normalize_table_to_relevant_shape(table: dict) -> dict:
     """Build the same per-table dict shape as :func:`get_relevant_tables` returns."""
