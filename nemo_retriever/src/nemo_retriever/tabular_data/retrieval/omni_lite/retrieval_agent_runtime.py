@@ -80,14 +80,14 @@ def _build_retrieval_system_prompt() -> str:
     )
 
 
-def _create_retrieval_agent(payload: AgentPayload, llm: Any) -> tuple[Any, RetrievalStore]:
+def _create_retrieval_agent(payload: AgentPayload, llm: Any, retriever=None) -> tuple[Any, RetrievalStore]:
     """Instantiate the Phase 1 Retrieval Deep Agent.
 
     Returns:
         ``(agent, store)`` — the agent ready for ``invoke()`` and the
         ``RetrievalStore`` that will be populated as tools are called.
     """
-    tools, store = build_retrieval_tools(payload, llm)
+    tools, store = build_retrieval_tools(payload, llm, retriever=retriever)
     system_prompt = _build_retrieval_system_prompt()
 
     logger.info(
@@ -178,6 +178,7 @@ def _format_user_prompt(question: str) -> str:
 def run_retrieval_agent(
     payload: AgentPayload,
     llm: Any | None = None,
+    retriever: Any | None = None,
     max_retries: int = 2,
 ) -> RetrievalContext:
     """Run the Phase 1 Retrieval Deep Agent and return a ``RetrievalContext``.
@@ -189,6 +190,9 @@ def run_retrieval_agent(
     Args:
         payload: Caller-supplied payload.  Required: ``question``.
         llm: Optional pre-built LLM client.
+        retriever: Optional pre-built ``OmniLiteRetriever`` singleton.  When
+            provided, the same instance is reused for all LanceDB searches in
+            this session — avoids re-initializing the embedder model each call.
         max_retries: Number of agent invocation attempts before giving up.
 
     Returns:
@@ -198,7 +202,7 @@ def run_retrieval_agent(
         llm = _make_llm()
 
     question = payload["question"]
-    agent, store = _create_retrieval_agent(payload, llm)
+    agent, store = _create_retrieval_agent(payload, llm, retriever=retriever)
     prompt = _format_user_prompt(question)
 
     last_error: Exception | None = None

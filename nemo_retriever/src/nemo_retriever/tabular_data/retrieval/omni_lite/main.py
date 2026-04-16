@@ -17,6 +17,7 @@ Phases
 """
 
 import logging
+import os
 
 from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
 from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
@@ -29,7 +30,10 @@ from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_agent_runtime imp
 )
 from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
 from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
+from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+    _make_llm,
+    _omni_semantic_retriever_init_kwargs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,19 @@ try:
 except ValueError as e:
     logger.error("Failed to initialize LLM client: %s", e)
     llm_client = None
+
+try:
+    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
+
+    _uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
+    _table = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
+    # top_k=30 covers the highest k used anywhere; per-call limits are applied
+    # downstream by _hits_to_semantic_rows so no results are wasted.
+    retriever_client = OmniLiteRetriever(**_omni_semantic_retriever_init_kwargs(_uri, _table, top_k=30))
+    logger.info("OmniLiteRetriever initialised once at startup (uri=%s table=%s)", _uri, _table)
+except Exception as e:
+    logger.error("Failed to initialize OmniLiteRetriever: %s", e)
+    retriever_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +181,7 @@ def get_agent_response(payload: AgentPayload) -> dict:
 
     # ── Phase 1: Retrieval ─────────────────────────────────────────────────
     logger.info("Phase 1 — Retrieval Agent starting for question: %s …", question[:80])
-    retrieval_ctx = run_retrieval_agent(payload, llm=llm_client)
+    retrieval_ctx = run_retrieval_agent(payload, llm=llm_client, retriever=retriever_client)
     logger.info(
         "Phase 1 — complete | entities=%d | coverage_complete=%s",
         len(retrieval_ctx.get("entity_coverage", [])),
@@ -192,4 +209,4 @@ def get_agent_response(payload: AgentPayload) -> dict:
     }
 
 
-__all__ = ["get_agent_response", "llm_client"]
+__all__ = ["get_agent_response", "llm_client", "retriever_client"]

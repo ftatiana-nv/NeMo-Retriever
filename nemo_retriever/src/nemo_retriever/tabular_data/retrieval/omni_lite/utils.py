@@ -362,6 +362,7 @@ def search_lancedb_semantic_index(
     entity: str,
     k: int = 30,
     label_filter: list[str] | None = None,
+    retriever=None,
 ) -> list[dict]:
     """
     Vector search over LanceDB via
@@ -372,6 +373,17 @@ def search_lancedb_semantic_index(
     (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
     ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
+
+    Args:
+        entity: Search query string.
+        k: Maximum number of results to return.  The shared ``retriever`` is
+            initialised with ``top_k=30`` (the highest value used anywhere); results
+            are truncated to ``k`` by ``_hits_to_semantic_rows``.
+        label_filter: Optional list of LanceDB label strings to restrict results.
+        retriever: Optional pre-built ``OmniLiteRetriever`` instance.  When
+            ``None`` a new instance is created for backward compatibility, but the
+            preferred path is to pass the module-level singleton from ``main.py``
+            via ``RetrievalStore.retriever``.
 
     Env — LanceDB: ``OMNI_SEMANTIC_LANCEDB_URI`` (default ``lancedb``),
     ``OMNI_SEMANTIC_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
@@ -388,10 +400,11 @@ def search_lancedb_semantic_index(
     allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
     limit = max(1, int(k))
 
-    retriever = OmniLiteRetriever(
-        **_omni_semantic_retriever_init_kwargs(uri, table_name, limit),
-        # reranker=True,  # enable second-stage reranking
-    )
+    if retriever is None:
+        retriever = OmniLiteRetriever(
+            **_omni_semantic_retriever_init_kwargs(uri, table_name, limit),
+            # reranker=True,  # enable second-stage reranking
+        )
 
     hits = retriever.query(
         entity,
@@ -408,6 +421,7 @@ def get_semantic_candidates_information(
     k: int = 5,
     threshold: float = 0,
     list_of_semantic: list | None = None,
+    retriever=None,
 ):
     """
     Vector search over LanceDB, then merge graph properties from ``expand_info``.
@@ -427,6 +441,7 @@ def get_semantic_candidates_information(
         entity,
         k=k,
         label_filter=labels,
+        retriever=retriever,
     )
     results.extend(nodes_results)
 
@@ -472,6 +487,7 @@ def extract_candidates(
     entities_and_concepts: list[str],
     query_no_values: str,
     query_with_values: str = "",
+    retriever=None,
 ) -> tuple[list[dict], list[dict]]:
     """
     One semantic search per string: ``query_no_values``, ``query_with_values`` (if distinct),
@@ -500,6 +516,7 @@ def extract_candidates(
                 text,
                 k=SEMANTIC_CANDIDATES_K,
                 list_of_semantic=[Labels.CUSTOM_ANALYSIS],
+                retriever=retriever,
             )
             or []
         )
@@ -508,6 +525,7 @@ def extract_candidates(
                 text,
                 k=SEMANTIC_CANDIDATES_K,
                 list_of_semantic=[Labels.COLUMN],
+                retriever=retriever,
             )
             or []
         )
@@ -1155,6 +1173,7 @@ def get_relevant_fks_from_candidates_tables(
 def get_relevant_tables(
     initial_question,
     k=15,
+    retriever=None,
 ):
     """Semantic search over the same LanceDB index as candidate retrieval, label ``table`` only."""
     try:
@@ -1162,6 +1181,7 @@ def get_relevant_tables(
             initial_question,
             k=k,
             label_filter=[Labels.TABLE],
+            retriever=retriever,
         )
     except Exception:
         logger.exception("get_relevant_tables: LanceDB search failed")

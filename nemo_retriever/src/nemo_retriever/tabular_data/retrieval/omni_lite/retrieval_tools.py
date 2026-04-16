@@ -66,7 +66,8 @@ class RetrievalStore:
     messages required.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, retriever=None) -> None:
+        self.retriever = retriever  # shared OmniLiteRetriever — init once in main.py
         self.question: str = ""
         self.entities: list[dict] = []
         self.entity_results: list[dict] = []
@@ -289,6 +290,7 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                 entities_and_concepts=[entity_term],
                 query_no_values=entity_term,
                 query_with_values=entity_term,
+                retriever=store.retriever,
             )
             custom_candidates = clean_results(list(custom_raw or []))
             column_candidates = clean_results(list(column_raw or []))
@@ -297,7 +299,7 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
             # Custom analysis candidates go into the candidates list.
             all_for_tables = custom_candidates + column_candidates
             relevant_tables, relevant_fks = get_relevant_fks_from_candidates_tables(all_for_tables)
-            add_tables, add_fks = get_relevant_tables(entity_term, k=3)
+            add_tables, add_fks = get_relevant_tables(entity_term, k=3, retriever=store.retriever)
             relevant_tables.extend(add_tables)
             relevant_fks.extend(add_fks)
             relevant_tables = dedupe_merge_relevant_tables(relevant_tables)
@@ -541,23 +543,26 @@ Return only the names of relevant tables. Use the exact table names from the lis
 # ---------------------------------------------------------------------------
 
 
-def build_retrieval_tools(payload: AgentPayload, llm: Any) -> tuple[list, RetrievalStore]:
+def build_retrieval_tools(payload: AgentPayload, llm: Any, retriever=None) -> tuple[list, RetrievalStore]:
     """Build and return the list of Phase 1 Retrieval Agent tools and a shared ``RetrievalStore``.
 
     Tools close over the store so all state is accumulated automatically as the
     agent calls them — no JSON passing between tool calls required.
 
     Args:
-        payload: The ``AgentPayload`` from the caller (reserved for future
-            session-scoped filtering).
+        payload: The ``AgentPayload`` from the caller.
         llm: The LLM client used by ``decompose_question`` and
             ``synthesize_expression``.
+        retriever: Optional pre-built ``OmniLiteRetriever`` singleton from
+            ``main.py``.  When provided, the same instance is reused across all
+            ``retrieve_for_entity`` calls in this session instead of creating a
+            new one each time.
 
     Returns:
         ``(tools, store)`` — tools list and the ``RetrievalStore`` that will be
         populated as the agent runs.
     """
-    store = RetrievalStore()
+    store = RetrievalStore(retriever=retriever)
     return [
         _make_decompose_question_tool(llm, store),
         _make_retrieve_for_entity_tool(store),
