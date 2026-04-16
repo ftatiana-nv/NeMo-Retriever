@@ -5,6 +5,7 @@
 
 class Labels:
     SQL = "Sql"
+    CUSTOM_ANALYSIS = "CustomAnalysis"
     COLUMN = "Column"
     TABLE = "Table"
     SCHEMA = "Schema"
@@ -15,6 +16,7 @@ class Labels:
         TABLE,
         COLUMN,
         SQL,
+        CUSTOM_ANALYSIS,
     ]
 
 
@@ -24,6 +26,7 @@ class Edges:
     JOIN = "JOIN"
     UNION = "UNION"
     SQL = "SQL"
+    HAS_SQL = "HAS_SQL"
 
 
 class Props:
@@ -32,3 +35,4 @@ class Props:
     JOIN = "join"
     UNION = "union"
     SQL_ID = "sql_id"
+    ANALYSIS_ID = "analysis_id"

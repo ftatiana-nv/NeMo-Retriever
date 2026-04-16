@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from nemo_retriever.tabular_data.config import load_custom_analyses
 from nemo_retriever.tabular_data.ingestion.utils import (
     normalize_fks,
     normalize_pks,
@@ -37,7 +38,9 @@ def data_for_populate_tabular(connector: SQLDatabase):
         "fks": fks,
         "queries": queries,
     }
-    # queries is not used by populate_tabular_data(); include if needed elsewhere
+    custom_analyses = load_custom_analyses()
+    if custom_analyses:
+        data["custom_analyses"] = custom_analyses
     return data
 
 
