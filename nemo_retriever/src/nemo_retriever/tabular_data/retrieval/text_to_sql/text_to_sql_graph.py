@@ -11,7 +11,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.entities_extractio
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.response import ResponseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
-from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromSemanticAgent
+from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
@@ -177,7 +177,7 @@ def create_graph():
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
-    sql_from_semantic_agent = SQLFromSemanticAgent()
+    sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
@@ -195,9 +195,9 @@ def create_graph():
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
-    construct_sql_from_semantic_node = _make_node(
-        "construct_sql_from_semantic",
-        agent_wrapper(sql_from_semantic_agent),
+    construct_sql_from_candidates_node = _make_node(
+        "construct_sql_from_candidates",
+        agent_wrapper(sql_from_candidates_agent),
     )
     reconstruct_sql_node = _make_node("reconstruct_sql", agent_wrapper(sql_reconstruction_agent))
 
@@ -221,7 +221,7 @@ def create_graph():
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("construct_sql_not_from_snippets", construct_sql_not_from_snippets_node)
-    graph.add_node("construct_sql_from_semantic", construct_sql_from_semantic_node)
+    graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("validate_intent", validate_intent_node)
@@ -232,10 +232,10 @@ def create_graph():
     # Minimal flow using only the defined nodes.
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
-    graph.add_edge("prepare_candidates", "construct_sql_from_semantic")
+    graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
 
     graph.add_conditional_edges(
-        "construct_sql_from_semantic",
+        "construct_sql_from_candidates",
         route_decision,
         {
             "validate_sql_query": "validate_sql_query",

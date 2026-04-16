@@ -144,11 +144,11 @@ class ResponseAgent(BaseAgent):
                     parts.append(f"• `{table_name}`")
 
         if custom_analyses_used and candidates:
-            semantic_items_used = self._format_custom_analyses_used(custom_analyses_used, candidates)
-            if semantic_items_used:
+            formatted_analyses = self._format_custom_analyses_used(custom_analyses_used, candidates)
+            if formatted_analyses:
                 parts.append("")
-                parts.append("**Semantic items used**:")
-                parts.extend(semantic_items_used)
+                parts.append("**Custom analyses used**:")
+                parts.extend(formatted_analyses)
 
         return "\n".join(parts)
 

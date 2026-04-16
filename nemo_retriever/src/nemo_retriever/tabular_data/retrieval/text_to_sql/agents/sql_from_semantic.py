@@ -37,7 +37,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
 )
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
-    create_sql_from_semantic_prompt,
+    create_sql_from_candidates_prompt,
     create_sql_user_prompt,
 )
 
@@ -121,7 +121,7 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
     return "\n\n".join(formatted_tables)
 
 
-class SQLFromSemanticAgent(BaseAgent):
+class SQLFromCandidatesAgent(BaseAgent):
     """
     Agent that constructs SQL from semantic retrieval and prepared schema context.
 
@@ -210,7 +210,7 @@ class SQLFromSemanticAgent(BaseAgent):
 
             # Choose system prompt based on context
 
-            system_prompt = create_sql_from_semantic_prompt(custom_analyses)
+            system_prompt = create_sql_from_candidates_prompt(custom_analyses)
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),

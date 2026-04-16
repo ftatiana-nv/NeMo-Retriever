@@ -34,7 +34,7 @@ class CandidateRetrievalAgent(BaseAgent):
 
     Retrieval Strategy:
     - Semantic search over custom analyses and columns (graph expansion via ``expand_info``
-      happens inside ``get_semantic_candidates_information`` / ``extract_candidates``).
+      happens inside ``get_candidates_information`` / ``extract_candidates``).
     - Clean candidate list (dedupe)
 
     Output:

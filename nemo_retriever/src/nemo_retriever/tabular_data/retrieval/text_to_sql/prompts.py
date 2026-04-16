@@ -187,11 +187,11 @@ def get_ontology_prompt(ontology):
     return ontology_prompt + "\n"
 
 
-def create_sql_from_semantic_prompt(custom_analyses: list) -> str:
+def create_sql_from_candidates_prompt(custom_analyses: list) -> str:
     """
     System prompt for SQL generation from semantic retrieval (custom analyses, columns, etc.).
 
-    Used by ``SQLFromSemanticAgent`` with prepared candidates from CandidatePreparationAgent.
+    Used by ``SQLFromCandidatesAgent`` with prepared candidates from CandidatePreparationAgent.
     """
 
     return """

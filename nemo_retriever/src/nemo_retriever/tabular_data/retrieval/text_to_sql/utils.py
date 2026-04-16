@@ -34,8 +34,8 @@ conn = get_neo4j_conn()
 # Larger numbers tend to confuse the LLM and increase latency.
 MAX_CALCULATION_CANDIDATES = 15
 
-# k for each get_semantic_candidates_information call (qnv, qwv, per-entity).
-SEMANTIC_CANDIDATES_K = 10
+# k for each get_candidates_information call (qnv, qwv, per-entity).
+CANDIDATES_K = 10
 
 # Per-attempt batch size when pulling semantic candidates. We keep this modest
 # to balance recall with response time and to leave room for deduping.
@@ -409,7 +409,7 @@ def search_lancedb_semantic_index(
     return _hits_to_semantic_rows(hits, allowed_labels, limit)
 
 
-def get_semantic_candidates_information(
+def get_candidates_information(
     entity: str,
     k: int = 5,
     threshold: float = 0,
@@ -422,7 +422,7 @@ def get_semantic_candidates_information(
     ``<-[:schema]-``), same shape as :func:`get_relevant_tables` / ``_normalize_table_to_relevant_shape``.
 
     Matches the call shape used by ``extract_candidates``:
-    ``get_semantic_candidates_information(text, k=..., list_of_semantic=[...])``.
+    ``get_candidates_information(text, k=..., list_of_semantic=[...])``.
     """
     if list_of_semantic is None:
         list_of_semantic = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN]
@@ -482,7 +482,7 @@ def extract_candidates(
     """
     One semantic search per string: ``query_no_values``, ``query_with_values`` (if distinct),
     and each entity name. For each string, pull custom analyses and columns via
-    ``get_semantic_candidates_information``. Merge streams, dedupe by (label, id) keeping the
+    ``get_candidates_information``. Merge streams, dedupe by (label, id) keeping the
     lowest vector distance (``score``), sort ascending by distance, cap at ``MAX_CALCULATION_CANDIDATES`` per stream.
 
     Returns:
@@ -502,17 +502,17 @@ def extract_candidates(
     combined_columns: list[dict] = []
     for text in pulls:
         combined_custom.extend(
-            get_semantic_candidates_information(
+            get_candidates_information(
                 text,
-                k=SEMANTIC_CANDIDATES_K,
+                k=CANDIDATES_K,
                 list_of_semantic=[Labels.CUSTOM_ANALYSIS],
             )
             or []
         )
         combined_columns.extend(
-            get_semantic_candidates_information(
+            get_candidates_information(
                 text,
-                k=SEMANTIC_CANDIDATES_K,
+                k=CANDIDATES_K,
                 list_of_semantic=[Labels.COLUMN],
             )
             or []
