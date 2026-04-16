@@ -171,8 +171,12 @@ def populate_queries(schemas, queries_df, num_workers, dialect):
                 with ThreadPoolExecutor(num_workers) as executor:
                     futures = (executor.submit(add_query, q.get_edges()) for q in parsed_queries.values())
                     for future in as_completed(futures):
-                        future.result()
-                        pbar.update(1)
+                        try:
+                            future.result()
+                        except Exception as exc:
+                            logger.error("Failed to persist query to graph: %s", exc, exc_info=True)
+                        finally:
+                            pbar.update(1)
 
     logger.info(f"Time took to parse and insert queries: {time.time() - before}")
     logger.info("Finished inserting the queries into the graph.")
