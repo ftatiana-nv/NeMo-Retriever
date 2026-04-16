@@ -1,6 +1,5 @@
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
-from langchain_core.messages import HumanMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentPayload,
     AgentState,
@@ -45,9 +44,7 @@ def route_sql_validation(state: AgentState) -> str:
         logger.info(f"Construct sql attempt: {attempts}")
         state["path_state"]["sql_attempts"] = attempts + 1
         if attempts == 4:
-            logger.info(
-                "Can not construct sql from snippets, try from relevant tables. Fallback."
-            )
+            logger.info("Can not construct sql from snippets, try from relevant tables. Fallback.")
             return "fallback"  # try constructing from tables, not only snippets
         elif attempts < 8:
             return "invalid_sql"
@@ -59,9 +56,7 @@ def route_sql_validation(state: AgentState) -> str:
         # SQL is valid - check if we should skip intent validation
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
         if reconstruction_count > 5:
-            logger.info(
-                f"Skipping intent validation after {reconstruction_count} reconstructions"
-            )
+            logger.info(f"Skipping intent validation after {reconstruction_count} reconstructions")
             return "skip_intent_validation"
         return "valid_sql"
 
@@ -92,7 +87,6 @@ def route_intent_validation(state: AgentState) -> str:
         return "valid_sql"
 
 
-
 def route_translation(state: AgentState) -> str:
     """
     Route to translation or graph END based on target language and context.
@@ -111,7 +105,6 @@ def route_translation(state: AgentState) -> str:
 
     # English (or unknown) → no translation
     return "end"
-
 
 
 def route_decision(state: AgentState) -> str:
@@ -140,7 +133,6 @@ def route_decision(state: AgentState) -> str:
     return mapped
 
 
-
 def _make_node(name, fn):
     """
     Create a node with logging wrapper.
@@ -150,7 +142,7 @@ def _make_node(name, fn):
     """
     return RunnableLambda(wrap_node_with_logging(name, fn))
 
- 
+
 def log_node_visit(state, node_name: str):
     """
     Track how many times each graph node was visited during a run.
@@ -175,17 +167,17 @@ def wrap_node_with_logging(node_name: str, fn):
 
     return wrapped
 
- 
+
 def create_graph():
 
- # ==================== CREATE AGENT INSTANCES ====================
+    # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
-    entities_extraction_agent = EntitiesExtractionAgent() 
+    entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
-    sql_from_semantic_agent = SQLFromSemanticAgent()  
+    sql_from_semantic_agent = SQLFromSemanticAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
@@ -193,20 +185,13 @@ def create_graph():
     response_agent = ResponseAgent()
     sql_unconstructable_agent = SQLUnconstructableAgent()
 
-
     # ==================== CREATE NODES ====================
 
     # Routing nodes (using agent_wrapper)
 
-    entities_extraction_node = _make_node(
-        "entities_extraction", agent_wrapper(entities_extraction_agent)
-    )
-    retrieve_candidates_node = _make_node(
-        "retrieve_candidates", agent_wrapper(retrieval_agent)
-    )
-    prepare_candidates_node = _make_node(
-        "prepare_candidates", agent_wrapper(candidate_preparation_agent)
-    )
+    entities_extraction_node = _make_node("entities_extraction", agent_wrapper(entities_extraction_agent))
+    retrieve_candidates_node = _make_node("retrieve_candidates", agent_wrapper(retrieval_agent))
+    prepare_candidates_node = _make_node("prepare_candidates", agent_wrapper(candidate_preparation_agent))
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
@@ -214,28 +199,15 @@ def create_graph():
         "construct_sql_from_semantic",
         agent_wrapper(sql_from_semantic_agent),
     )
-    reconstruct_sql_node = _make_node(
-        "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)
-    )
+    reconstruct_sql_node = _make_node("reconstruct_sql", agent_wrapper(sql_reconstruction_agent))
 
-    validate_sql_query_node = _make_node(
-        "validate_sql_query", agent_wrapper(sql_validation_agent)
-    )
-    validate_intent_node = _make_node(
-        "validate_intent", agent_wrapper(intent_validation_agent)
-    )
-    execute_sql_query_node = _make_node(
-        "execute_sql_query", agent_wrapper(sql_execution_agent)
-    )
-    format_and_respond_node = _make_node(
-        "format_and_respond", agent_wrapper(response_agent)
-    )
+    validate_sql_query_node = _make_node("validate_sql_query", agent_wrapper(sql_validation_agent))
+    validate_intent_node = _make_node("validate_intent", agent_wrapper(intent_validation_agent))
+    execute_sql_query_node = _make_node("execute_sql_query", agent_wrapper(sql_execution_agent))
+    format_and_respond_node = _make_node("format_and_respond", agent_wrapper(response_agent))
     unconstructable_sql_response_node = _make_node(
         "unconstructable_sql_response", agent_wrapper(sql_unconstructable_agent)
     )
-
-
-
 
     # ==================== CREATE GRAPH ====================
 
@@ -261,8 +233,6 @@ def create_graph():
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
     graph.add_edge("prepare_candidates", "construct_sql_from_semantic")
-    
-
 
     graph.add_conditional_edges(
         "construct_sql_from_semantic",
@@ -273,7 +243,7 @@ def create_graph():
         },
     )
 
-       # SQL validation → route
+    # SQL validation → route
     graph.add_conditional_edges(
         "validate_sql_query",
         route_sql_validation,
@@ -312,7 +282,6 @@ def create_graph():
     graph.add_edge("unconstructable_sql_response", END)
     graph.add_edge("format_and_respond", END)
 
-
     return graph
 
 
@@ -322,10 +291,3 @@ __all__ = [
     "create_graph",
     "get_question_for_processing",
 ]
-
-
-
-
-
-
-

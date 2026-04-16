@@ -76,6 +76,7 @@ class TextToSqlRetriever(Retriever):
             or_parts.append(f"label IN ({cls._sql_in_literals(labels)})")
 
         if have_metadata:
+
             def value_variants(canonical: str) -> list[str]:
                 c = canonical.lower()
                 if c == "table":
@@ -111,7 +112,6 @@ class TextToSqlRetriever(Retriever):
         query_vectors: list[list[float]],
         query_texts: list[str],
         label_in: Optional[Sequence[str]] = None,
-        
     ) -> list[list[dict[str, Any]]]:
         import lancedb  # type: ignore
         import numpy as np
@@ -204,12 +204,7 @@ class TextToSqlRetriever(Retriever):
                 if "label" in field_names:
                     hybrid_cols = ["label"] + hybrid_cols
                 try:
-                    hits = (
-                        chain.select(hybrid_cols)
-                        .limit(int(top_k))
-                        .rerank(RRFReranker())
-                        .to_list()
-                    )
+                    hits = chain.select(hybrid_cols).limit(int(top_k)).rerank(RRFReranker()).to_list()
                 except Exception:
                     logger.exception(
                         "TextToSqlRetriever._search_lancedb: hybrid search failed query[%d] where=%s",

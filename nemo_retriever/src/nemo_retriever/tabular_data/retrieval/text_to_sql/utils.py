@@ -11,11 +11,11 @@ from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 import pandas as pd
 
-from langchain_community.vectorstores import PGVector
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 import numpy as np
 from datetime import date, timedelta
+
 logger = logging.getLogger(__name__)
 
 # Load .env from current working directory so LLM_API_KEY, LLM_INVOKE_URL are set (run from repo root)
@@ -56,9 +56,6 @@ TABLES_USAGE_PERCENTILE = "tables_usage_percentile"
 COLUMNS_USAGE_PERCENTILE = "columns_usage_percentile"
 
 
-
-
-
 def _make_llm() -> ChatNVIDIA:
     # Prefer LLM_API_KEY; fall back to NVIDIA_API_KEY (used by LangChain NVIDIA docs)
     api_key = os.environ.get("LLM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
@@ -68,7 +65,7 @@ def _make_llm() -> ChatNVIDIA:
         model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
     )
 
-    
+
 class Labels(StrEnum):
     """Semantic labels used by text-to-sql candidate retrieval."""
 
@@ -85,11 +82,6 @@ class Labels(StrEnum):
     VIEW = "view"
     SEMANTIC = "semantic"
 
-    
-
-    
-  
-
 
 def store_usage_percentiles(
     percentiles_type_name: str,
@@ -99,7 +91,9 @@ def store_usage_percentiles(
     query = """
             MATCH (n:Database)
             WITH n
-            CALL apoc.create.setProperties(n, [$percentiles_type_name_25, $percentiles_type_name_75], [$usage_percentile_25, $usage_percentile_75]) 
+            CALL apoc.create.setProperties(n,
+                [$percentiles_type_name_25, $percentiles_type_name_75],
+                [$usage_percentile_25, $usage_percentile_75])
             YIELD node
             RETURN n
             """
@@ -114,18 +108,18 @@ def store_usage_percentiles(
     )
 
 
-
 def get_stored_usage_percentiles(percentiles_type_name: str):
     query = f"""
                 MATCH (n:Database)
-                RETURN n.{f"{percentiles_type_name}_25"} as usage_percentile_25, n.{f"{percentiles_type_name}_75"} as usage_percentile_75
+                RETURN n.{f"{percentiles_type_name}_25"} as usage_percentile_25,
+                       n.{f"{percentiles_type_name}_75"} as usage_percentile_75
                 """
     results = conn.query_read(
         query=query,
-        parameters={
-        },
+        parameters={},
     )
     return results
+
 
 def get_count_str_by_month(alias: str):
     current = date.today().replace(day=1)
@@ -139,31 +133,24 @@ def get_count_str_by_month(alias: str):
     count_str = "+".join(count_3_month)
     return count_str
 
+
 def init_queries_usage_percentiles():
     count_string = get_count_str_by_month("n")
     query_all = f"""match(n:sql{{is_sub_select:FALSE}})
                      return collect({count_string}) as usages """
-    usages_result = conn.query_read(
-        query=query_all, parameters={}
-    )
+    usages_result = conn.query_read(query=query_all, parameters={})
     usages = usages_result[0]["usages"]
     if len(usages) == 0:
         return 0, 0
     usage_percentile_25 = np.percentile(usages, 25)
     usage_percentile_75 = np.percentile(usages, 75)
-    store_usage_percentiles(
-        QUERIES_USAGE_PERCENTILE, usage_percentile_25, usage_percentile_75
-    )
+    store_usage_percentiles(QUERIES_USAGE_PERCENTILE, usage_percentile_25, usage_percentile_75)
     return usage_percentile_25, usage_percentile_75
 
 
 def get_usage_percentiles():
-    stored_percentiles = get_stored_usage_percentiles(
-        QUERIES_USAGE_PERCENTILE
-    )
-    if len(stored_percentiles) == 0 or (
-        stored_percentiles[0]["usage_percentile_25"] is None
-    ):
+    stored_percentiles = get_stored_usage_percentiles(QUERIES_USAGE_PERCENTILE)
+    if len(stored_percentiles) == 0 or (stored_percentiles[0]["usage_percentile_25"] is None):
         usage_percentile_25, usage_percentile_75 = init_queries_usage_percentiles()
     else:
         usage_percentile_25 = stored_percentiles[0]["usage_percentile_25"]
@@ -204,9 +191,7 @@ queries_for_columns_params = {
     "sql_subgraph_labels": ">sql|-table",
     "sql_type": Labels.QUERY,
 }
-queries_for_columns_params_keys = ", ".join(
-    [f"{key}:${key}" for key in queries_for_columns_params.keys()]
-)
+queries_for_columns_params_keys = ", ".join([f"{key}:${key}" for key in queries_for_columns_params.keys()])
 
 
 def expand_info(ids_and_labels):
@@ -251,7 +236,9 @@ def expand_info(ids_and_labels):
                             WITH n, parent, column_list,
                                  apoc.map.merge(
                                      properties(parent),
-                                     {{label: coalesce(parent.label, toLower(head(labels(parent))), "table"), columns: column_list}}
+                                     {{label: coalesce(parent.label,
+                                      toLower(head(labels(parent))), "table"),
+                                      columns: column_list}}
                                  ) AS t0
                             RETURN apoc.map.merge(
                                      apoc.map.setPairs(properties(n),[
@@ -365,10 +352,9 @@ def _t2s_retriever_init_kwargs(
         "lancedb_table": table_name,
         "top_k": top_k,
     }
-    http_ep = (
-        (os.environ.get("T2S_EMBEDDING_HTTP_ENDPOINT") or "").strip()
-        or (os.environ.get("EMBEDDING_HTTP_ENDPOINT") or "").strip()
-    )
+    http_ep = (os.environ.get("T2S_EMBEDDING_HTTP_ENDPOINT") or "").strip() or (
+        os.environ.get("EMBEDDING_HTTP_ENDPOINT") or ""
+    ).strip()
     if http_ep:
         kwargs["embedding_http_endpoint"] = http_ep
         kwargs["embedding_api_key"] = (os.environ.get("NVIDIA_API_KEY") or "").strip()
@@ -384,7 +370,8 @@ def search_lancedb_semantic_index(
     label_filter: list[str] | None = None,
 ) -> list[dict]:
     """
-    Vector search over LanceDB via :class:`~nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override.TextToSqlRetriever`
+    Vector search over LanceDB via
+    :class:`~...retrieval.text_to_sql.retrieval_override.TextToSqlRetriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
     ``TextToSqlRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
@@ -410,7 +397,6 @@ def search_lancedb_semantic_index(
     retriever = TextToSqlRetriever(
         **_t2s_retriever_init_kwargs(uri, table_name, limit),
         # reranker=True,  # enable second-stage reranking
-
     )
 
     hits = retriever.query(
@@ -421,9 +407,6 @@ def search_lancedb_semantic_index(
     )
 
     return _hits_to_semantic_rows(hits, allowed_labels, limit)
-
-
-
 
 
 def get_semantic_candidates_information(
@@ -464,11 +447,7 @@ def get_semantic_candidates_information(
             c.update(extra)
             rel_tabs = c.get("relevant_tables")
             if isinstance(rel_tabs, list):
-                c["relevant_tables"] = [
-                    _normalize_table_to_relevant_shape(t)
-                    for t in rel_tabs
-                    if isinstance(t, dict)
-                ]
+                c["relevant_tables"] = [_normalize_table_to_relevant_shape(t) for t in rel_tabs if isinstance(t, dict)]
 
     results.sort(key=lambda item: float(item.get("score") if item.get("score") is not None else float("inf")))
     return results
@@ -516,7 +495,7 @@ def extract_candidates(
     if (qwv := (query_with_values or "").strip()) and qwv != qnv:
         pulls.append(qwv)
     for ent in entities_and_concepts or []:
-        if (t := (ent or "").strip()):
+        if t := (ent or "").strip():
             pulls.append(t)
 
     combined_custom: list[dict] = []
@@ -548,7 +527,6 @@ def extract_candidates(
     )
 
     return out_custom, out_columns
-
 
 
 def get_semantic_entities_ids(items):
@@ -587,7 +565,6 @@ def get_semantic_entities_ids(items):
     return classified_ids_and_labels
 
 
-
 def extract_entities_with_id_name_label(data):
     result = {}
 
@@ -621,6 +598,31 @@ def extract_entities_with_id_name_label(data):
     recurse(data)
     return result
 
+
+def get_node_properties_by_id(id, label: str | list[str]):
+    if isinstance(label, list):
+        label_filter = "|".join(label)
+    else:
+        label_filter = label
+    query = f"""
+        MATCH(n:{label_filter}{{id:$id}})
+        RETURN apoc.map.setKey(properties(n),"label", labels(n)[0]) as props
+    """
+
+    props = conn.query_read_only(query, parameters={"id": id})
+    if len(props) == 0:
+        return None
+    else:
+        return props[0]["props"]
+
+
+def get_item_by_id(account_id, item_id, label):
+    result = get_node_properties_by_id(account_id, item_id, label)
+    if result:
+        return result
+    else:
+        logger.error(f"The required item with id : {item_id} is not found in graph. ERROR.")
+        return None
 
 
 def highlight_entity(items_present: dict, text: str) -> str:
@@ -676,9 +678,7 @@ def highlight_entity(items_present: dict, text: str) -> str:
             if item:
                 return f"<{prepare_link(item['name'], eid, name_or_label)}>"
             else:
-                logger.warning(
-                    f"Entity ID mismatch or not found: {name_or_label}/{eid}"
-                )
+                logger.warning(f"Entity ID mismatch or not found: {name_or_label}/{eid}")
                 return f"*{display_name or name_or_label}*"
         else:
             logger.warning(f"No ID found in entity: {cleaned}")
@@ -687,57 +687,53 @@ def highlight_entity(items_present: dict, text: str) -> str:
     return re.sub(r"\[\[\[(.*?)\]\]\]", replace_entity, text)
 
 
-
 def format_response(candidates, response):
     final_response_formatted = response.replace("%%%", "```").replace("**", "*")
     final_response_formatted = re.sub(r"(\\+n|\n)", "\n ", final_response_formatted)
     all_entities_present = extract_entities_with_id_name_label(candidates)
 
     try:
-        final_response_highlighted = highlight_entity(
-            all_entities_present, final_response_formatted
-        )
+        final_response_highlighted = highlight_entity(all_entities_present, final_response_formatted)
     except Exception:
         return final_response_formatted
     return final_response_highlighted
 
 
-
 def get_relevant_fks(tables_ids):
     # Build a connected graph by expanding from target tables through FK relationships
-    query = """ 
+    query = """
     // Start with target tables and expand outward to find connected tables
     WITH $tables_ids as current_ids
-    
+
     // Level 1: Find tables connected via FK
     OPTIONAL MATCH (t0:Table WHERE t0.id IN current_ids)
           -[:schema]->(:Column)-[:fk]-(:Column)<-[:schema]-(t1:Table)
     WITH current_ids, collect(DISTINCT t1.id) as new_ids_1
     WITH current_ids + new_ids_1 as level_1_ids
-    
+
     // Level 2
     OPTIONAL MATCH (t1:Table WHERE t1.id IN level_1_ids)
           -[:schema]->(:Column)-[:fk]-(:Column)<-[:schema]-(t2:Table)
     WITH level_1_ids, collect(DISTINCT t2.id) as new_ids_2
     WITH level_1_ids + new_ids_2 as level_2_ids
-    
+
     // Level 3
     OPTIONAL MATCH (t2:Table WHERE t2.id IN level_2_ids)
           -[:schema]->(:Column)-[:fk]-(:Column)<-[:schema]-(t3:Table)
     WITH level_2_ids, collect(DISTINCT t3.id) as new_ids_3
     WITH level_2_ids + new_ids_3 as all_table_ids
-    
+
     // Get all FK relationships between these tables
     MATCH (t1:Table)-[:schema]->(col1:Column)-[:fk]-(col2:Column)<-[:schema]-(t2:Table)
     WHERE t1.id IN all_table_ids AND t2.id IN all_table_ids
       AND t1.id < t2.id  // Avoid duplicates by keeping only one direction
-    
+
     RETURN collect(DISTINCT {
-        table1: t1.schema_name + '.' + t1.name, 
-        column1: col1.name, 
-        column1_datatype: coalesce(col1.data_type, 'None'), 
-        table2: t2.schema_name + '.' + t2.name, 
-        column2: col2.name, 
+        table1: t1.schema_name + '.' + t1.name,
+        column1: col1.name,
+        column1_datatype: coalesce(col1.data_type, 'None'),
+        table2: t2.schema_name + '.' + t2.name,
+        column2: col2.name,
         column2_datatype: coalesce(col2.data_type, 'None')
     }) as list_of_foreign_keys
     """
@@ -748,35 +744,35 @@ def get_relevant_fks(tables_ids):
         result_fks = []
 
     # Build a connected graph by expanding from target tables through FK relationships
-    query = """ 
+    query = """
     // Start with target tables and expand outward to find connected tables
-    
+
     // Level 1: Find tables connected via FK
     OPTIONAL MATCH (t0:Table WHERE t0.id IN $tables_ids)-[:join]-(t1:Table)
     WITH collect(DISTINCT t1.id) as new_ids_1
     WITH $tables_ids + new_ids_1 as level_1_ids
-    
+
     // Level 2
     OPTIONAL MATCH (t1:Table WHERE t1.id IN level_1_ids)-[:join]-(t2:Table)
     WITH level_1_ids, collect(DISTINCT t2.id) as new_ids_2
     WITH level_1_ids + new_ids_2 as level_2_ids
-    
+
     // Level 3
     OPTIONAL MATCH (t2:Table WHERE t2.id IN level_2_ids)-[:join]-(t3:Table)
     WITH level_2_ids, collect(DISTINCT t3.id) as new_ids_3
     WITH level_2_ids + new_ids_3 as all_table_ids
-    
+
     // Get all join relationships between these tables and parse the join property
     MATCH (t1:Table)-[rel:join]-(t2:Table)
     WHERE t1.id IN all_table_ids AND t2.id IN all_table_ids
       AND t1.id < t2.id  // Avoid duplicates by keeping only one direction
       AND rel.join IS NOT NULL
-    
+
     // Parse the join property: split by operators and extract left/right sides
     WITH t1, t2, rel,
          trim(apoc.text.split(rel.join, '<=|>=|=|<|>')[0]) as left_side,
          trim(apoc.text.split(rel.join, '<=|>=|=|<|>')[1]) as right_side
-    
+
     // Parse left side: SCHEMA.TABLE.COLUMN (handle potential whitespace)
     WITH t1, t2, rel, left_side, right_side,
          trim(split(left_side, '.')[0]) as left_schema,
@@ -787,20 +783,24 @@ def get_relevant_fks(tables_ids):
          trim(split(right_side, '.')[2]) as right_column
     WHERE left_schema IS NOT NULL AND left_table IS NOT NULL AND left_column IS NOT NULL
       AND right_schema IS NOT NULL AND right_table IS NOT NULL AND right_column IS NOT NULL
-    
+
     // Match the actual column nodes for left side
-    OPTIONAL MATCH (s1:Schema{name: left_schema})-[:schema]->(tbl1:Table{name: left_table})-[:schema]->(col1:Column{name: left_column})
-    
+    OPTIONAL MATCH (s1:Schema{name: left_schema})
+        -[:schema]->(tbl1:Table{name: left_table})
+        -[:schema]->(col1:Column{name: left_column})
+
     // Match the actual column nodes for right side
-    OPTIONAL MATCH (s2:Schema{name: right_schema})-[:schema]->(tbl2:Table{name: right_table})-[:schema]->(col2:Column{name: right_column})
-    
+    OPTIONAL MATCH (s2:Schema{name: right_schema})
+        -[:schema]->(tbl2:Table{name: right_table})
+        -[:schema]->(col2:Column{name: right_column})
+
     // Return the structured format
     RETURN collect(DISTINCT {
-        table1: t1.schema_name + '.' + t1.name, 
-        column1: coalesce(col1.name, left_column), 
-        column1_datatype: coalesce(col1.data_type, 'None'), 
-        table2: t2.schema_name + '.' + t2.name, 
-        column2: coalesce(col2.name, right_column), 
+        table1: t1.schema_name + '.' + t1.name,
+        column1: coalesce(col1.name, left_column),
+        column1_datatype: coalesce(col1.data_type, 'None'),
+        table2: t2.schema_name + '.' + t2.name,
+        column2: coalesce(col2.name, right_column),
         column2_datatype: coalesce(col2.data_type, 'None')
     }) as list_of_foreign_keys
     """
@@ -874,9 +874,14 @@ def get_slim_account_schemas(
     relevant_schemas_ids: list | None = None,
 ) -> list[dict[str, str]]:
     if relevant_schemas_ids is not None and len(relevant_schemas_ids) > 0:
-        query = """ MATCH (db:Database)-[:CONTAINS]->(schema:Schema WHERE schema.id in $relevant_schemas_ids)
-                    -[:CONTAINS]->(table:Table WHERE coalesce(table.deleted, FALSE)=FALSE)
-                    -[:CONTAINS]->(column:Column WHERE coalesce(column.deleted, FALSE)=FALSE AND NOT column.db_name IS NULL)
+        query = """
+                    MATCH (db:Database)-[:CONTAINS]->
+                        (schema:Schema WHERE schema.id in $relevant_schemas_ids)
+                    -[:CONTAINS]->(table:Table
+                        WHERE coalesce(table.deleted, FALSE)=FALSE)
+                    -[:CONTAINS]->(column:Column
+                        WHERE coalesce(column.deleted, FALSE)=FALSE
+                        AND NOT column.db_name IS NULL)
                     RETURN collect({
                     db_name:column.db_name,
                     id:column.id,
@@ -910,7 +915,7 @@ def get_slim_account_schemas(
 
 
 def get_all_schemas_ids():
-    query = f"""MATCH(s:Schema)
+    query = """MATCH(s:Schema)
                 RETURN s.id as schema_id
             """
     result = pd.DataFrame(
@@ -920,7 +925,6 @@ def get_all_schemas_ids():
         )
     )
     return result["schema_id"].tolist()
-
 
 
 def get_schemas_slim(relevant_schemas_ids: list = None):
@@ -978,12 +982,9 @@ def get_schemas_slim(relevant_schemas_ids: list = None):
     before_modify_all = time.time()
     for schema in schemas:
         create_schema_node(schema)
-    logger.info(
-        f"total time it took to create all schemas nodes: {time.time() - before_modify_all}"
-    )
+    logger.info(f"total time it took to create all schemas nodes: {time.time() - before_modify_all}")
     logger.info(f"total time for get_schemas_slim(): {time.time() - before_get_all}")
     return all_schemas
-
 
 
 def build_semantic_items_section(items, candidates):
@@ -1002,9 +1003,7 @@ def build_semantic_items_section(items, candidates):
 
     # Normalize to attribute access via getattr (fallback to dict.get)
     def _get(obj, key, default=None):
-        return getattr(
-            obj, key, obj.get(key, default) if isinstance(obj, dict) else default
-        )
+        return getattr(obj, key, obj.get(key, default) if isinstance(obj, dict) else default)
 
     # Map candidate id -> candidate object
     by_id = {_get(c, "id"): c for c in candidates if _get(c, "id")}
@@ -1028,9 +1027,7 @@ def build_semantic_items_section(items, candidates):
     return "\n\n**Semantic items used**:\n" + "\n".join(matched_lines)
 
 
-def get_relevant_queries(  # TODO: check
-    candidates
-):
+def get_relevant_queries(candidates):  # TODO: check
     snippet_queries = []
     for candidate in candidates:
         if candidate.get("label", "") == "custom_analysis":
@@ -1038,9 +1035,7 @@ def get_relevant_queries(  # TODO: check
             # Check if sql list is not empty before accessing index 0
             if not analysis_sql:
                 continue
-            s_query = analysis_sql[0].get(
-                "sql_code", ""
-            )  # analysis can't be without sql, one sql? [0]?
+            s_query = analysis_sql[0].get("sql_code", "")  # analysis can't be without sql, one sql? [0]?
             if s_query and s_query not in snippet_queries:
                 snippet_queries.append(s_query)
     return snippet_queries
@@ -1132,9 +1127,7 @@ def _apply_foreign_key_hints(tables: list[dict], relevant_fks: list) -> None:
     for table in tables:
         for fk in relevant_fks:
             if table["name"] == fk["table1"]:
-                table["foreign_key"] = (
-                    f"'{table['name']}.{fk['column1']}' = '{fk['table2']}.{fk['column2']}'"
-                )
+                table["foreign_key"] = f"'{table['name']}.{fk['column1']}' = '{fk['table2']}.{fk['column2']}'"
 
 
 def get_relevant_fks_from_candidates_tables(
@@ -1179,9 +1172,7 @@ def get_relevant_fks_from_candidates_tables(
         _strip_relevant_tables()
         return [], []
 
-    relevant_tables = [
-        _normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id
-    ]
+    relevant_tables = [_normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id]
     relevant_fks: list[dict] = []
     try:
         relevant_fks = get_relevant_fks([x["id"] for x in relevant_tables])
@@ -1240,7 +1231,6 @@ def get_relevant_tables(
     _apply_foreign_key_hints(relevant_tables_list, relevant_fks)
 
     return relevant_tables_list, relevant_fks
-
 
 
 def prepare_link(name: str, id: str, label: Labels, parent_id: str = None) -> str:

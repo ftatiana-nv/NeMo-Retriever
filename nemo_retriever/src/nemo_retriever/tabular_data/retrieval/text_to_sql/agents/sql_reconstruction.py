@@ -20,7 +20,7 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.llm_invoke import invoke_with_structured_output
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
@@ -29,8 +29,6 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
 )
 from nemo_retriever.tabular_data.retrieval.text_to_sql.models import SQLGenerationModel
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_semantic_entities_ids
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +131,6 @@ class SQLReconstructionAgent(BaseAgent):
         # Formatting will be handled by SQLResponseFormattingAgent
 
         schema = SQLGenerationModel  # Use SQLGenerationModel for all non-feedback cases
-            
 
         # Invoke LLM for reconstruction
         response = invoke_with_structured_output(llm, messages, schema)
@@ -148,9 +145,7 @@ class SQLReconstructionAgent(BaseAgent):
         sql_preview = (getattr(response, "sql_code", "") or "")[:100]
         self.logger.info(f"SQL reconstructed: {sql_preview}...")
 
-        response_explanation = getattr(
-            response, "response", getattr(response, "thought", "No explanation")
-        ) or ""
+        response_explanation = getattr(response, "response", getattr(response, "thought", "No explanation")) or ""
         self.logger.info(f"Reconstruction explanation: {response_explanation[:100]}...")
 
         # Extract semantic elements
@@ -163,9 +158,7 @@ class SQLReconstructionAgent(BaseAgent):
             "path_state": {
                 **path_state,
                 "sql_generation_result": response,
-                "relevant_tables": all_tables
-                if all_tables is not None
-                else path_state.get("relevant_tables", []),
+                "relevant_tables": all_tables if all_tables is not None else path_state.get("relevant_tables", []),
                 "semantic_elements": semantic_elements,
             },
         }

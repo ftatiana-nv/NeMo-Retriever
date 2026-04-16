@@ -28,10 +28,8 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState, 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import create_sql_general_prompt, create_sql_user_prompt
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_relevant_tables
 
-
-
 logger = logging.getLogger(__name__)
-    
+
 
 class SQLFromTablesAgent(BaseAgent):
     """
@@ -81,9 +79,7 @@ class SQLFromTablesAgent(BaseAgent):
         # Get relevant tables (search if not already available)
         relevant_tables = path_state.get("relevant_tables", [])
         if not relevant_tables:
-            relevant_tables, _ = get_relevant_tables(
-                question
-            )
+            relevant_tables, _ = get_relevant_tables(question)
 
         # Find similar questions from conversation history
         similar_questions = []

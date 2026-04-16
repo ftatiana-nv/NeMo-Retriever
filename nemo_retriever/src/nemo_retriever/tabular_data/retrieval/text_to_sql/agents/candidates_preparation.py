@@ -20,8 +20,6 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
-import networkx as nx
-
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
@@ -91,7 +89,7 @@ class CandidatePreparationAgent(BaseAgent):
         question = get_question_for_processing(state)
         candidates = list(path_state.get("retrieved_candidates") or [])
 
-        relevant_tables , relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
+        relevant_tables, relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
 
         additional_tables, additional_fks = get_relevant_tables(
             question,
@@ -105,10 +103,7 @@ class CandidatePreparationAgent(BaseAgent):
         relevant_tables = dedupe_merge_relevant_tables(relevant_tables)
         _apply_foreign_key_hints(relevant_tables, relevant_fks)
 
-        self.logger.info(
-            f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys"
-        )
-
+        self.logger.info(f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys")
 
         relevant_queries = get_relevant_queries(
             candidates,
@@ -129,9 +124,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         # Build string representation of complex candidates for prompts
         complex_candidates_str = self._build_complex_candidates_str(candidates)
-        self.logger.info(
-            f"Built string representation with {len(complex_candidates_str)} entries"
-        )
+        self.logger.info(f"Built string representation with {len(complex_candidates_str)} entries")
 
         # Store all prepared data in path_state
         return {
@@ -144,7 +137,6 @@ class CandidatePreparationAgent(BaseAgent):
                 "complex_candidates_str": complex_candidates_str,
             }
         }
-
 
     def _build_complex_candidates_str(self, candidates: list) -> list[str]:
         """
@@ -164,7 +156,6 @@ class CandidatePreparationAgent(BaseAgent):
             if x.get("label") == Labels.CUSTOM_ANALYSIS:
                 complex_candidates.append(x)
 
-        
         def sort_key(candidate):
             return -candidate.get("score", 0)
 
@@ -178,9 +169,7 @@ class CandidatePreparationAgent(BaseAgent):
                     f"name: {x['name']}, label: {x['label']}, id: {x['id']}, sql_snippet: {preview}"
                 )
             else:
-                complex_candidates_str.append(
-                    f"name: {x['name']}, label: {x['label']}, id: {x['id']}"
-                )
+                complex_candidates_str.append(f"name: {x['name']}, label: {x['label']}, id: {x['id']}")
         return complex_candidates_str
 
     def _get_cleaned_sql(self, candidate: dict) -> str:
@@ -198,10 +187,7 @@ class CandidatePreparationAgent(BaseAgent):
         """
         sql_entries = candidate.get("sql") or []
         if isinstance(sql_entries, list) and sql_entries:
-            raw = (
-                sql_entries[0].get("sql_code")
-                or ""
-            )
+            raw = sql_entries[0].get("sql_code") or ""
             if not isinstance(raw, str):
                 raw = str(raw)
             # Light cleanup: reduce common escaping that confuses the model

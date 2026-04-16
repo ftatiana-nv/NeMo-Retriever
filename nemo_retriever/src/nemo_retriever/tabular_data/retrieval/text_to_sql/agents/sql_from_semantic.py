@@ -19,7 +19,7 @@ Design Decisions:
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from langchain_core.messages import AIMessage, SystemMessage
 
@@ -97,9 +97,7 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         if not isinstance(columns, list):
             columns = []
         if columns:
-            table_parts.append(
-                "  AVAILABLE COLUMNS (only use these columns for this table):"
-            )
+            table_parts.append("  AVAILABLE COLUMNS (only use these columns for this table):")
             for col in columns:
                 # Handle both dict and string column formats
                 if isinstance(col, dict):
@@ -131,7 +129,8 @@ class SQLFromSemanticAgent(BaseAgent):
     CandidatePreparationAgent, then prompts the LLM to produce SQL
 
     Input Requirements:
-    - path_state["retrieved_candidates"]: Candidate dicts from preparation (flat list; legacy wrapped shape still accepted)
+    - path_state["retrieved_candidates"]: Candidate dicts from preparation
+      (flat list; legacy wrapped shape still accepted)
     - path_state["relevant_tables"] / relevant_fks: schema context
     - path_state["relevant_queries"]: Relevant queries (from CandidatePreparationAgent)
 
@@ -149,9 +148,7 @@ class SQLFromSemanticAgent(BaseAgent):
         """Validate that prepared candidates exist for semantic SQL construction."""
         path_state = state.get("path_state", {})
         if not path_state.get("retrieved_candidates"):
-            self.logger.warning(
-                "No candidates found for SQL construction from semantic context"
-            )
+            self.logger.warning("No candidates found for SQL construction from semantic context")
             return False
         return True
 
@@ -185,18 +182,11 @@ class SQLFromSemanticAgent(BaseAgent):
         complex_candidates = path_state.get("complex_candidates", [])
         complex_candidates_str = path_state.get("complex_candidates_str", [])
 
-
         # Format similar questions for prompt
-        similar_questions_txt = "\n".join(
-            f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions
-        )
-        self.logger.info(
-            f"Using {len(similar_questions)} similar questions from conversations."
-        )
+        similar_questions_txt = "\n".join(f"question: {x[0]}\nanswer: {x[1]}" for x in similar_questions)
+        self.logger.info(f"Using {len(similar_questions)} similar questions from conversations.")
 
-        def build_messages(
-            
-        ) -> list:
+        def build_messages() -> list:
             """
             Build messages for SQL construction.
 
@@ -211,8 +201,7 @@ class SQLFromSemanticAgent(BaseAgent):
                 main_question=question,
                 observation_block=observation_block,
                 fks=[
-                    f"{item['table1']}.{item['column1']} = {item['table2']}.{item['column2']}"
-                    for item in relevant_fks
+                    f"{item['table1']}.{item['column1']} = {item['table2']}.{item['column2']}" for item in relevant_fks
                 ],
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
@@ -220,23 +209,18 @@ class SQLFromSemanticAgent(BaseAgent):
             )
 
             # Choose system prompt based on context
-            
+
             system_prompt = create_sql_from_semantic_prompt(complex_candidates)
-                    
+
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),
                 AIMessage(content=user_prompt),
             ]
 
             # Add calendar time window reminder if needed
-            if any(
-                phrase in question.lower()
-                for phrase in ["last week", "last month", "last year"]
-            ):
+            if any(phrase in question.lower() for phrase in ["last week", "last month", "last year"]):
                 messages.append(
-                    SystemMessage(
-                        content="Apply only calendar time windows. DO NOT apply rolling time windows."
-                    )
+                    SystemMessage(content="Apply only calendar time windows. DO NOT apply rolling time windows.")
                 )
 
             return messages
@@ -254,13 +238,16 @@ class SQLFromSemanticAgent(BaseAgent):
                 response = safe_invoke_with_structured_output(llm, messages, schema)
             except Exception as e:
                 self.logger.error(
-                    "LLM structured output failed: %s: %s", type(e).__name__, e,
+                    "LLM structured output failed: %s: %s",
+                    type(e).__name__,
+                    e,
                     exc_info=True,
                 )
                 return None, messages
             if response and hasattr(response, "response") and response.response:
                 self.logger.info(
-                    "LLM response generated: %s...", response.response[:100],
+                    "LLM response generated: %s...",
+                    response.response[:100],
                 )
             return response, messages
 
@@ -271,7 +258,9 @@ class SQLFromSemanticAgent(BaseAgent):
             if response is not None:
                 break
             self.logger.warning(
-                "LLM returned None on attempt %d/%d — retrying.", attempt, MAX_RETRIES,
+                "LLM returned None on attempt %d/%d — retrying.",
+                attempt,
+                MAX_RETRIES,
             )
 
         if response is None:
@@ -291,7 +280,7 @@ class SQLFromSemanticAgent(BaseAgent):
         if has_sql:
             # Extract semantic elements
             semantic_elements = []
-            if hasattr(response, "semantic_elements") and response.semantic_elements: # TODO check, fix
+            if hasattr(response, "semantic_elements") and response.semantic_elements:  # TODO check, fix
                 # Filter semantic elements to keep only those found in candidates
                 candidates_ids = {
                     c.get("id") if isinstance(c, dict) else getattr(c, "id", None)
@@ -300,13 +289,10 @@ class SQLFromSemanticAgent(BaseAgent):
                 filtered_elements = [
                     elem
                     for elem in response.semantic_elements
-                    if (elem.id if hasattr(elem, "id") else elem.get("id"))
-                    in candidates_ids
+                    if (elem.id if hasattr(elem, "id") else elem.get("id")) in candidates_ids
                 ]
                 response.semantic_elements = filtered_elements
-                semantic_elements = get_semantic_entities_ids(
-                    response.semantic_elements
-                )
+                semantic_elements = get_semantic_entities_ids(response.semantic_elements)
 
             return {
                 "messages": messages,  # Don't add formatted response here - formatting agent will do it
@@ -324,9 +310,7 @@ class SQLFromSemanticAgent(BaseAgent):
                 response.response += build_semantic_items_section(
                     response.semantic_elements, path_state["retrieved_candidates"]
                 )
-                semantic_elements = get_semantic_entities_ids(
-                    response.semantic_elements
-                )
+                semantic_elements = get_semantic_entities_ids(response.semantic_elements)
 
             return {
                 "messages": messages + [AIMessage(content=response.response)],
@@ -343,9 +327,7 @@ class SQLFromSemanticAgent(BaseAgent):
             return {
                 "path_state": {
                     **path_state,
-                    "unconstructable_explanation": response.response
-                    or "Unable to construct response.",
+                    "unconstructable_explanation": response.response or "Unable to construct response.",
                 },
                 "decision": "unconstructable",
             }
-

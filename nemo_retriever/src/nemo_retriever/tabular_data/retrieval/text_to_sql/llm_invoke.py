@@ -1,5 +1,5 @@
 from langchain_core.messages import BaseMessage, SystemMessage
-from typing import Type, TypeVar, cast
+from typing import Type, TypeVar
 from pydantic import BaseModel, ValidationError
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 import logging
@@ -7,11 +7,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-
-
 RETRY_MAX_ATTEMPTS = 3
 T = TypeVar("T", bound=BaseModel)
-
 
 
 def safe_invoke_with_structured_output(
@@ -43,9 +40,7 @@ def safe_invoke_with_structured_output(
                     )
                 )
             else:
-                logger.error(
-                    f"Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}"
-                )
+                logger.error(f"Validation failed after {RETRY_MAX_ATTEMPTS} attempts for {schema_name}")
                 raise  # If still failing after max tries, raise
 
         except Exception as e:

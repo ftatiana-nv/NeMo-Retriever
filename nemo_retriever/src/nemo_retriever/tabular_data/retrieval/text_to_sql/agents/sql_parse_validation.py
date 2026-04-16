@@ -23,8 +23,11 @@ from typing import Dict, Any
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
-from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_all_schemas_ids, get_schemas_slim, get_semantic_entities_ids
-
+from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
+    get_all_schemas_ids,
+    get_schemas_slim,
+    get_semantic_entities_ids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,20 +80,17 @@ class SQLValidationAgent(BaseAgent):
             - decision: "valid_sql" or "invalid_sql"
         """
         path_state = state.get("path_state", {})
-       
+
         response = path_state.get("sql_generation_result")
-        relevant_tables = path_state.get("relevant_tables", [])
         dialect = state.get("dialect", "")
 
-
-    
         # Convert schema IDs to schemas dict format (keyed by schema name)
         # relevant_schemas_ids is a set of schema IDs, need to convert to dict format
         # TODO, uncomment when parser is ready, fix
-        schemas = get_schemas_slim(list(get_all_schemas_ids())) 
+        schemas = get_schemas_slim(list(get_all_schemas_ids()))
 
         validation_result = self._sql_parse_validation(schemas, response.sql_code, dialect)
-        
+
         if validation_result.get("error"):
             # SQL is invalid
             error_msg = validation_result["error"]
@@ -129,7 +129,7 @@ class SQLValidationAgent(BaseAgent):
     def _sql_parse_validation(schemas, sql: str, dialect: str) -> dict:
         result: dict = {}
         try:
-            query = parse_query_single(
+            parse_query_single(
                 sql=sql,
                 dialect=dialect,
                 schemas=schemas,

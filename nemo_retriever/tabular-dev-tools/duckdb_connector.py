@@ -120,8 +120,6 @@ class DuckDB(SQLDatabase):
         df["end_time"] = datetime.today()
         return df
 
-        
-
     def get_views(self) -> pd.DataFrame:
         """Return all views from information_schema."""
         return self.execute(

@@ -73,10 +73,8 @@ class CandidateRetrievalAgent(BaseAgent):
 
         try:
             # Semantic search: custom analyses + columns (see extract_candidates).
-            entities_and_concepts = path_state.get("entities_and_concepts", []) 
-            query_no_values = path_state.get(
-                "query_no_values", ""
-            )
+            entities_and_concepts = path_state.get("entities_and_concepts", [])
+            query_no_values = path_state.get("query_no_values", "")
 
             extracted = extract_candidates(
                 entities_and_concepts,
@@ -95,22 +93,12 @@ class CandidateRetrievalAgent(BaseAgent):
                 for item in extracted or []:
                     merged_raw_candidates.append(item.get("candidate", item))
                 cleaned_mixed = clean_results(merged_raw_candidates)
-                retrieved_custom_analyses = [
-                    c
-                    for c in cleaned_mixed
-                    if c.get("label") == Labels.CUSTOM_ANALYSIS
-                ]
-                retrieved_column_candidates = [
-                    c
-                    for c in cleaned_mixed
-                    if c.get("label") == Labels.COLUMN
-                ]
+                retrieved_custom_analyses = [c for c in cleaned_mixed if c.get("label") == Labels.CUSTOM_ANALYSIS]
+                retrieved_column_candidates = [c for c in cleaned_mixed if c.get("label") == Labels.COLUMN]
 
             path_state["retrieved_custom_analyses"] = retrieved_custom_analyses
             path_state["retrieved_column_candidates"] = retrieved_column_candidates
-            path_state["retrieved_candidates"] = (
-                retrieved_custom_analyses + retrieved_column_candidates
-            )
+            path_state["retrieved_candidates"] = retrieved_custom_analyses + retrieved_column_candidates
 
             n_custom = len(retrieved_custom_analyses)
             n_column = len(retrieved_column_candidates)
@@ -123,9 +111,7 @@ class CandidateRetrievalAgent(BaseAgent):
 
         except Exception as e:
             # Fallback: empty candidates (routing agent will handle)
-            self.logger.warning(
-                f"Candidate retrieval failed: {e}, returning empty candidates"
-            )
+            self.logger.warning(f"Candidate retrieval failed: {e}, returning empty candidates")
             path_state["retrieved_candidates"] = []
             path_state["retrieved_custom_analyses"] = []
             path_state["retrieved_column_candidates"] = []

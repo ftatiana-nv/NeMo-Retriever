@@ -4,7 +4,11 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload, AgentState
-from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import main_system_prompt_template, ONTOLOGY, get_ontology_prompt
+from nemo_retriever.tabular_data.retrieval.text_to_sql.prompts import (
+    main_system_prompt_template,
+    ONTOLOGY,
+    get_ontology_prompt,
+)
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import _make_llm
 
 logger = logging.getLogger(__name__)

@@ -22,7 +22,6 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     prepare_link,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,9 +65,7 @@ class ResponseAgent(BaseAgent):
         candidates_with_entities = path_state.get("candidates", [])
 
         candidates = [
-            item["candidate"]
-            if isinstance(item, dict) and "candidate" in item
-            else item
+            item["candidate"] if isinstance(item, dict) and "candidate" in item else item
             for item in candidates_with_entities
         ]
 
@@ -103,8 +100,7 @@ class ResponseAgent(BaseAgent):
         self.logger.info("Calculation response prepared and returned")
 
         return {
-            "messages": state["messages"]
-            + [AIMessage(content=formatted_response)],
+            "messages": state["messages"] + [AIMessage(content=formatted_response)],
             "path_state": {
                 **path_state,
                 "formatted_response": formatted_response,
@@ -148,9 +144,7 @@ class ResponseAgent(BaseAgent):
                     parts.append(f"• `{table_name}`")
 
         if semantic_elements and candidates:
-            semantic_items_used = self._format_semantic_elements(
-                semantic_elements, candidates
-            )
+            semantic_items_used = self._format_semantic_elements(semantic_elements, candidates)
             if semantic_items_used:
                 parts.append("")
                 parts.append("**Semantic items used**:")
@@ -159,9 +153,7 @@ class ResponseAgent(BaseAgent):
         return "\n".join(parts)
 
     @staticmethod
-    def _extract_table_info(
-        relevant_tables: list, tables_ids: list[str]
-    ) -> list[dict]:
+    def _extract_table_info(relevant_tables: list, tables_ids: list[str]) -> list[dict]:
         table_info = []
         if relevant_tables:
             for table in relevant_tables:
@@ -171,19 +163,13 @@ class ResponseAgent(BaseAgent):
                     table_info.append({"name": table_name, "id": table_id})
         return table_info
 
-    def _format_semantic_elements(
-        self, semantic_elements: list, candidates: list
-    ) -> list[str]:
+    def _format_semantic_elements(self, semantic_elements: list, candidates: list) -> list[str]:
         if not semantic_elements or not candidates:
             return []
 
         candidates_by_id = {}
         for candidate in candidates:
-            candidate_id = (
-                candidate.get("id")
-                if isinstance(candidate, dict)
-                else getattr(candidate, "id", None)
-            )
+            candidate_id = candidate.get("id") if isinstance(candidate, dict) else getattr(candidate, "id", None)
             if candidate_id:
                 candidates_by_id[candidate_id] = candidate
 
@@ -210,15 +196,9 @@ class ResponseAgent(BaseAgent):
                 )
                 continue
 
-            candidate_name = (
-                candidate.get("name")
-                if isinstance(candidate, dict)
-                else getattr(candidate, "name", "")
-            )
+            candidate_name = candidate.get("name") if isinstance(candidate, dict) else getattr(candidate, "name", "")
             candidate_label = (
-                candidate.get("label")
-                if isinstance(candidate, dict)
-                else getattr(candidate, "label", None)
+                candidate.get("label") if isinstance(candidate, dict) else getattr(candidate, "label", None)
             )
             label_to_use = candidate_label or elem_label
 
@@ -226,8 +206,6 @@ class ResponseAgent(BaseAgent):
                 link = prepare_link(candidate_name, elem_id, label_to_use)
                 formatted_items.append(f"• *<{link}>*")
             else:
-                self.logger.warning(
-                    f"Semantic element {elem_id} found in candidates but missing name, removing"
-                )
+                self.logger.warning(f"Semantic element {elem_id} found in candidates but missing name, removing")
 
         return formatted_items

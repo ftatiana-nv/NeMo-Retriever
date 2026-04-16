@@ -5,18 +5,11 @@ Executes validated SQL via the injected DB connector.
 """
 
 import logging
-import os
-import sys
-from pathlib import Path
-from typing import Any, Dict
-
-
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import is_infra_or_auth_error
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
-
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +32,6 @@ def _run_sql(sql: str, state: AgentState) -> QueryResponse:
             return QueryResponse(result=None, sliced=False, error=str(e))
         payload = df.to_json(orient="records", default_handler=str) if len(df) else "[]"
         return QueryResponse(result=[payload], sliced=False, error=None)
-
 
 
 class SQLExecutionAgent(BaseAgent):

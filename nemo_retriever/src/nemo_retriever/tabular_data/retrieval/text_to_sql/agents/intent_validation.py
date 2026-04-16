@@ -34,7 +34,6 @@ from pydantic import BaseModel, Field
 
 from langchain_core.messages import SystemMessage, AIMessage
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -46,18 +45,26 @@ class IntentValidationModel(BaseModel):
     )
     missing_entities: list[str] = Field(
         default_factory=list,
-        description="List of CRITICAL entity names that are completely missing and essential for the query. Leave EMPTY [] if no entities are missing — do NOT add explanatory text like 'no missing entities'.",
+        description=(
+            "List of CRITICAL entity names that are completely missing and essential for the query. "
+            "Leave EMPTY [] if no entities are missing — do NOT add explanatory text like 'no missing entities'."
+        ),
     )
     join_issues: list[str] = Field(
         default_factory=list,
-        description="List of CRITICAL join issues that would produce completely wrong results. Leave EMPTY [] if there are no join issues — do NOT add explanatory text like 'no join issues'.",
+        description=(
+            "List of CRITICAL join issues that would produce completely wrong results. "
+            "Leave EMPTY [] if there are no join issues — do NOT add explanatory text like 'no join issues'."
+        ),
     )
     aggregation_issues: list[str] = Field(
         default_factory=list,
-        description="List of CRITICAL aggregation issues that are clearly wrong (not minor variations). Leave EMPTY [] if there are no aggregation issues — do NOT add explanatory text like 'no aggregation issues'.",
+        description=(
+            "List of CRITICAL aggregation issues that are clearly wrong (not minor variations). "
+            "Leave EMPTY [] if there are no aggregation issues — "
+            "do NOT add explanatory text like 'no aggregation issues'."
+        ),
     )
-
-
 
 
 class IntentValidationAgent(BaseAgent):
@@ -142,13 +149,11 @@ class IntentValidationAgent(BaseAgent):
         question = get_question_for_processing(state)
 
         # Get entities from action_input
-       
+
         required_entities = path_state.get("entities_and_concepts", [])
 
         if required_entities:
-            self.logger.info(
-                f"Validating intent with required entities: {required_entities}"
-            )
+            self.logger.info(f"Validating intent with required entities: {required_entities}")
             entities_text = "\n".join([f"- {entity}" for entity in required_entities])
         else:
             self.logger.info("No required entities specified for intent validation")
@@ -163,9 +168,7 @@ class IntentValidationAgent(BaseAgent):
 
         # Call LLM for validation
         try:
-            validation_result = invoke_with_structured_output(
-                llm, messages, IntentValidationModel
-            )
+            validation_result = invoke_with_structured_output(llm, messages, IntentValidationModel)
         except Exception as e:
             self.logger.error(f"Intent validation LLM call failed: {str(e)}")
             # On error, pass through (don't block execution)
@@ -183,9 +186,7 @@ class IntentValidationAgent(BaseAgent):
             }
 
         has_real_issues = (
-            validation_result.missing_entities
-            or validation_result.join_issues
-            or validation_result.aggregation_issues
+            validation_result.missing_entities or validation_result.join_issues or validation_result.aggregation_issues
         )
         if not has_real_issues:
             self.logger.info("SQL validation passed (is_valid=False but no real issues listed)")
@@ -198,29 +199,22 @@ class IntentValidationAgent(BaseAgent):
         error_parts = ["Critical SQL issues found:"]
 
         if validation_result.missing_entities:
-            error_parts.append(
-                f"\n\nCritical missing entities: {', '.join(validation_result.missing_entities)}"
-            )
+            error_parts.append(f"\n\nCritical missing entities: {', '.join(validation_result.missing_entities)}")
 
         if validation_result.join_issues:
             error_parts.append(
-                "\n\nCritical join issues:\n"
-                + "\n".join(f"  - {issue}" for issue in validation_result.join_issues)
+                "\n\nCritical join issues:\n" + "\n".join(f"  - {issue}" for issue in validation_result.join_issues)
             )
 
         if validation_result.aggregation_issues:
             error_parts.append(
                 "\n\nCritical aggregation issues:\n"
-                + "\n".join(
-                    f"  - {issue}" for issue in validation_result.aggregation_issues
-                )
+                + "\n".join(f"  - {issue}" for issue in validation_result.aggregation_issues)
             )
 
         error_msg = "".join(error_parts)
 
-        self.logger.info(
-            f"SQL validation failed (critical issues): {error_msg[:200]}..."
-        )
+        self.logger.info(f"SQL validation failed (critical issues): {error_msg[:200]}...")
 
         # Store error and return invalid decision
         updated_path_state = {

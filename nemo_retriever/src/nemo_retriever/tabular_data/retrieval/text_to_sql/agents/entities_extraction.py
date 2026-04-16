@@ -59,12 +59,8 @@ class EntitiesExtractionAgent(BaseAgent):
         question = get_question_for_processing(state)
 
         try:
-            extraction_messages = base_messages + [
-                SystemMessage(content=create_entity_extraction_prompt(question))
-            ]
-            extraction_result = invoke_with_structured_output(
-                llm, extraction_messages, EntitiesExtractionModel
-            )
+            extraction_messages = base_messages + [SystemMessage(content=create_entity_extraction_prompt(question))]
+            extraction_result = invoke_with_structured_output(llm, extraction_messages, EntitiesExtractionModel)
             entities_and_concepts = extraction_result.required_entity_name or []
 
             path_state["query_no_values"] = extraction_result.query_no_values
@@ -78,9 +74,7 @@ class EntitiesExtractionAgent(BaseAgent):
             return {"path_state": path_state}
 
         except Exception as e:
-            self.logger.warning(
-                f"Entity extraction failed: {e}, using fallback values"
-            )
+            self.logger.warning(f"Entity extraction failed: {e}, using fallback values")
             path_state["query_no_values"] = question
             path_state["entities_and_concepts"] = []
 
