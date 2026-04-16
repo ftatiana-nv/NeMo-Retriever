@@ -236,9 +236,17 @@ coverage_complete: {ctx.get('coverage_complete', False)}
 
 Rules:
 - Use ONLY tables listed above.  Never reference unlisted tables.
+- Use ONLY FK relationships listed for JOINs.  Never invent join conditions.
 - For entities with resolved_as="expression", embed their sql_expression directly.
 - If coverage_complete=false, note which entity is unresolved in the notes field.
 - Prefer certified SQL snippets as structural references when available.
+
+MANDATORY — Fully-Qualified Identifiers (apply in every expression you write in the plan):
+- Every table reference MUST be SCHEMA.TABLE AS alias  (e.g. school_scheduling.Students AS s).
+- Every column reference MUST be alias.column           (e.g. s.StudentCity).
+- join_conditions must use alias.col = alias.col        (e.g. s.DeptID = d.DeptID).
+- select_expressions, where_conditions, group_by, order_by must all use alias.column.
+- Never write a bare table name, bare column name, or column without an alias prefix.
 
 Produce a structured query plan."""
 
