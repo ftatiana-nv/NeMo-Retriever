@@ -20,6 +20,8 @@ class AgentPayload(TypedDict):
     path_state: NotRequired[dict]
     dialect: NotRequired[str]
     connector: NotRequired[Any]
+    acronyms: NotRequired[str]
+    custom_prompts: NotRequired[str]
 
 
 class AgentState(TypedDict):
