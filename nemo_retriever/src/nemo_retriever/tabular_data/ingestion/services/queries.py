@@ -25,7 +25,6 @@ from nemo_retriever.tabular_data.ingestion.model.query import Query
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
     ExtractionResult,
-    TableMatch,
     extract_tables_and_columns,
 )
 from nemo_retriever.tabular_data.ingestion.parsers.query_comparator import (
@@ -215,7 +214,8 @@ def _try_merge_in_memory(
             props["total_counter"] = props.get("total_counter", 0) + sql_count
             existing_q.sql_node.add_property("total_counter", props["total_counter"])
             logger.info(
-                "Merged structurally equivalent query into in-memory query %s.", qid,
+                "Merged structurally equivalent query into in-memory query %s.",
+                qid,
             )
             return True
     return False
@@ -278,8 +278,13 @@ def parse_queries_df(
                 continue
 
             if _try_merge_in_memory(
-                sql_text, sql_count, dialect, query_obj,
-                table_index, parsed_queries, norm_cache,
+                sql_text,
+                sql_count,
+                dialect,
+                query_obj,
+                table_index,
+                parsed_queries,
+                norm_cache,
             ):
                 continue
 

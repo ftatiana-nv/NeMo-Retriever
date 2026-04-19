@@ -68,16 +68,22 @@ class TestCompareQueriesIdentical:
         assert compare_queries(sql, sql) is True
 
     def test_select_order_insensitive(self):
-        assert compare_queries(
-            "SELECT id, name FROM users",
-            "SELECT name, id FROM users",
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT id, name FROM users",
+                "SELECT name, id FROM users",
+            )
+            is True
+        )
 
     def test_case_insensitive_identifiers(self):
-        assert compare_queries(
-            "SELECT Id, Name FROM Users",
-            "SELECT id, name FROM users",
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT Id, Name FROM Users",
+                "SELECT id, name FROM users",
+            )
+            is True
+        )
 
     def test_select_order_in_cte(self):
         q1 = "WITH cte AS (SELECT a, b FROM t) SELECT * FROM cte"
@@ -90,25 +96,34 @@ class TestCompareQueriesIdentical:
         assert compare_queries(q1, q2) is True
 
     def test_ignore_literals_different_filter_values(self):
-        assert compare_queries(
-            "SELECT id FROM orders WHERE created > '2024-01-01'",
-            "SELECT id FROM orders WHERE created > '2025-06-15'",
-            ignore_literals=True,
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT id FROM orders WHERE created > '2024-01-01'",
+                "SELECT id FROM orders WHERE created > '2025-06-15'",
+                ignore_literals=True,
+            )
+            is True
+        )
 
     def test_ignore_literals_different_numeric_values(self):
-        assert compare_queries(
-            "SELECT id FROM orders WHERE amount > 100",
-            "SELECT id FROM orders WHERE amount > 500",
-            ignore_literals=True,
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT id FROM orders WHERE amount > 100",
+                "SELECT id FROM orders WHERE amount > 500",
+                ignore_literals=True,
+            )
+            is True
+        )
 
     def test_combined_select_order_and_ignore_literals(self):
-        assert compare_queries(
-            "SELECT order_total_price, order_id FROM orders WHERE order_date = '15/12/2024'",
-            "SELECT order_id, order_total_price FROM orders WHERE order_date = '15/12/2025'",
-            ignore_literals=True,
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT order_total_price, order_id FROM orders WHERE order_date = '15/12/2024'",
+                "SELECT order_id, order_total_price FROM orders WHERE order_date = '15/12/2025'",
+                ignore_literals=True,
+            )
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -118,41 +133,59 @@ class TestCompareQueriesIdentical:
 
 class TestCompareQueriesDifferent:
     def test_different_tables(self):
-        assert compare_queries(
-            "SELECT id FROM users",
-            "SELECT id FROM orders",
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT id FROM users",
+                "SELECT id FROM orders",
+            )
+            is False
+        )
 
     def test_different_columns(self):
-        assert compare_queries(
-            "SELECT id FROM users",
-            "SELECT name FROM users",
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT id FROM users",
+                "SELECT name FROM users",
+            )
+            is False
+        )
 
     def test_extra_where_clause(self):
-        assert compare_queries(
-            "SELECT id FROM users",
-            "SELECT id FROM users WHERE active = 1",
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT id FROM users",
+                "SELECT id FROM users WHERE active = 1",
+            )
+            is False
+        )
 
     def test_different_join(self):
-        assert compare_queries(
-            "SELECT a.id FROM a JOIN b ON a.id = b.id",
-            "SELECT a.id FROM a JOIN c ON a.id = c.id",
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT a.id FROM a JOIN b ON a.id = b.id",
+                "SELECT a.id FROM a JOIN c ON a.id = c.id",
+            )
+            is False
+        )
 
     def test_different_literals_without_flag(self):
-        assert compare_queries(
-            "SELECT id FROM t WHERE x = '2024'",
-            "SELECT id FROM t WHERE x = '2025'",
-            ignore_literals=False,
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT id FROM t WHERE x = '2024'",
+                "SELECT id FROM t WHERE x = '2025'",
+                ignore_literals=False,
+            )
+            is False
+        )
 
     def test_different_aggregation(self):
-        assert compare_queries(
-            "SELECT COUNT(id) FROM users",
-            "SELECT SUM(id) FROM users",
-        ) is False
+        assert (
+            compare_queries(
+                "SELECT COUNT(id) FROM users",
+                "SELECT SUM(id) FROM users",
+            )
+            is False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -168,17 +201,23 @@ class TestCompareQueriesEdgeCases:
         assert compare_queries("GARBAGE", "ALSO GARBAGE") is False
 
     def test_single_column_select_order_irrelevant(self):
-        assert compare_queries(
-            "SELECT id FROM t",
-            "SELECT id FROM t",
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT id FROM t",
+                "SELECT id FROM t",
+            )
+            is True
+        )
 
     def test_dialect_parameter(self):
-        assert compare_queries(
-            "SELECT a, b FROM t",
-            "SELECT b, a FROM t",
-            dialect="duckdb",
-        ) is True
+        assert (
+            compare_queries(
+                "SELECT a, b FROM t",
+                "SELECT b, a FROM t",
+                dialect="duckdb",
+            )
+            is True
+        )
 
     def test_complex_cte_with_reordered_selects(self):
         q1 = """

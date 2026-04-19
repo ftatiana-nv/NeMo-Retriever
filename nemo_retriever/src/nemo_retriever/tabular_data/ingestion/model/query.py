@@ -50,11 +50,7 @@ class Query:
         This mirrors the old ``get_leafs_from_graph`` heuristic used for
         pre-filtering duplicate candidates.
         """
-        return list({
-            edge[1].id
-            for edge in self.edges
-            if edge[1].label == Labels.COLUMN
-        })
+        return list({edge[1].id for edge in self.edges if edge[1].label == Labels.COLUMN})
 
     def get_nodes_counter(self) -> int:
         """Total number of nodes in the sqlglot AST.

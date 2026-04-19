@@ -52,11 +52,7 @@ def _normalize(tree: exp.Expression, dialect: str | None, ignore_literals: bool)
         # constant values rather than real column references.
         for col in list(tree.find_all(exp.Column)):
             ident = col.this
-            if (
-                isinstance(ident, exp.Identifier)
-                and ident.args.get("quoted")
-                and not col.table
-            ):
+            if isinstance(ident, exp.Identifier) and ident.args.get("quoted") and not col.table:
                 col.replace(exp.Placeholder())
 
     for select_node in tree.find_all(exp.Select):
