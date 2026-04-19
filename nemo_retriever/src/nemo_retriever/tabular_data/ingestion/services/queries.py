@@ -334,7 +334,6 @@ def populate_queries(schemas, queries_df, num_workers, dialect):
                             logger.exception("Failed to persist query to graph.")
                         pbar.update(1)
 
-
     logger.info(f"Time took to parse and insert queries: {time.time() - before}")
     logger.info("Finished inserting the queries into the graph.")
     return failed_queries
