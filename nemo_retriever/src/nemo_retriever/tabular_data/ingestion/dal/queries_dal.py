@@ -19,9 +19,7 @@ def add_query(edges):
 
 
 def get_sql_by_full_query(sql_full_query: str):
-    query = (
-        f"MATCH (n:{Labels.SQL} {{sql_full_query: $sql_full_query}}) RETURN n.id AS id"
-    )
+    query = f"MATCH (n:{Labels.SQL} {{sql_full_query: $sql_full_query}}) RETURN n.id AS id"
     result = get_neo4j_conn().query_read(
         query=query,
         parameters={"sql_full_query": sql_full_query},
