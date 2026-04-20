@@ -175,7 +175,9 @@ def _compact_schema(retrieval_ctx: RetrievalContext) -> str:
         cols = []
         for col in t.get("columns") or []:
             if isinstance(col, dict):
-                cols.append(col.get("name") or "")
+                name = col.get("name") or ""
+                dtype = col.get("data_type") or ""
+                cols.append(f"{name} ({dtype})" if dtype else name)
             elif isinstance(col, str):
                 cols.append(col)
         lines.append(f"  {fqn}: [{', '.join(c for c in cols if c)}]")
