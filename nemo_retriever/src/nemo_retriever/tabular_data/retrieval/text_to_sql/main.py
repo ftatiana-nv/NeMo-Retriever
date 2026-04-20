@@ -1,6 +1,7 @@
 import logging
 import time
 from datetime import datetime
+from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph import create_graph
@@ -20,53 +21,37 @@ graph = create_graph()
 app = graph.compile()
 
 
-def get_agent_response(payload: AgentPayload):
-    t0 = time.perf_counter()
+def _build_state(payload: AgentPayload) -> AgentState:
     acronyms = payload.get("acronyms", "")
     custom_prompts = payload.get("custom_prompts", "")
 
     acronyms_text = f"Acronyms:\n{acronyms}\n\n" if acronyms else ""
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
-    connector = payload.get("connector")
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
         acronyms=acronyms_text,
         custom_prompts=custom_prompts_text,
-        dialect=connector.dialect,
     )
     messages = [
         SystemMessage(content=main_system_prompt),
         HumanMessage(content=payload["question"]),
     ]
 
-    initial_path_state = dict(payload.get("path_state") or {})
-
-    state: AgentState = {
+    return {
         "llm": llm_client,
         "initial_question": payload["question"],
         "connector": payload.get("connector"),
         "messages": messages,
         "decision": "",
-        "path_state": initial_path_state,
+        "path_state": dict(payload.get("path_state") or {}),
     }
 
-    final_state = state.copy()
-    for step in app.stream(state, config={"recursion_limit": 45}):
-        logger.info("--- AGENT STEP ---")
-        for node_name, node_output in step.items():
-            logger.info("Node: %s", node_name)
-            if node_output:
-                if "path_state" in node_output:
-                    if "path_state" not in final_state:
-                        final_state["path_state"] = {}
-                    final_state["path_state"].update(node_output["path_state"])
-                for key, value in node_output.items():
-                    if key != "path_state":
-                        final_state[key] = value
 
+def _extract_answer(final_state: dict) -> dict:
     path_state = final_state.get("path_state", {})
     final_response = path_state.get("final_response")
+
     if final_response is None:
         messages_out = final_state.get("messages", [])
         if messages_out:
@@ -80,13 +65,59 @@ def get_agent_response(payload: AgentPayload):
             final_response = ""
 
     if isinstance(final_response, dict):
-        answer = final_response
-    else:
-        answer = {"response": str(final_response)}
-
-    elapsed = time.perf_counter() - t0
-    logger.info("Final answer to user (%.2fs):\n%s", elapsed, answer)
-    return answer
+        return final_response
+    return {"response": str(final_response)}
 
 
-__all__ = ["get_agent_response", "app", "graph", "llm_client"]
+def stream_agent_response(
+    payload: AgentPayload,
+) -> Generator[dict, None, None]:
+    """Yield ``{"type": "step", "node": ...}`` for each graph node,
+    then ``{"type": "result", "answer": ...}`` with the final answer.
+    On error yields ``{"type": "error", "message": ...}``."""
+    t0 = time.perf_counter()
+    state = _build_state(payload)
+    final_state = dict(state)
+
+    try:
+        for step in app.stream(state, config={"recursion_limit": 45}):
+            for node_name, node_output in step.items():
+                logger.info("Node: %s", node_name)
+                yield {"type": "step", "node": node_name}
+
+                if node_output:
+                    if "path_state" in node_output:
+                        if "path_state" not in final_state:
+                            final_state["path_state"] = {}
+                        final_state["path_state"].update(node_output["path_state"])
+                    for key, value in node_output.items():
+                        if key != "path_state":
+                            final_state[key] = value
+
+        answer = _extract_answer(final_state)
+        elapsed = time.perf_counter() - t0
+        logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
+        yield {"type": "result", "answer": answer}
+
+    except Exception:
+        logger.exception("Error during agent stream")
+        yield {"type": "error", "message": "An internal error occurred."}
+
+
+def get_agent_response(payload: AgentPayload) -> dict:
+    """Non-streaming convenience wrapper around ``stream_agent_response``."""
+    for event in stream_agent_response(payload):
+        if event["type"] == "result":
+            return event["answer"]
+        if event["type"] == "error":
+            raise RuntimeError(event["message"])
+    return {}
+
+
+__all__ = [
+    "get_agent_response",
+    "stream_agent_response",
+    "app",
+    "graph",
+    "llm_client",
+]
