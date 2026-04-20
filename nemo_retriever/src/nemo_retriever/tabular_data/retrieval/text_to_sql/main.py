@@ -27,12 +27,13 @@ def get_agent_response(payload: AgentPayload):
 
     acronyms_text = f"Acronyms:\n{acronyms}\n\n" if acronyms else ""
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
+    connector = payload.get("connector")
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
         acronyms=acronyms_text,
         custom_prompts=custom_prompts_text,
-        dialect=payload.get("dialect"),
+        dialect=connector.dialect,
     )
     messages = [
         SystemMessage(content=main_system_prompt),
@@ -44,7 +45,6 @@ def get_agent_response(payload: AgentPayload):
     state: AgentState = {
         "llm": llm_client,
         "initial_question": payload["question"],
-        "dialect": payload.get("dialect"),
         "connector": payload.get("connector"),
         "messages": messages,
         "decision": "",

@@ -82,7 +82,7 @@ class SQLValidationAgent(BaseAgent):
         path_state = state.get("path_state", {})
 
         response = path_state.get("sql_generation_result")
-        dialect = state.get("dialect", "")
+        dialect = state.get("connector").dialect
 
         # Convert schema IDs to schemas dict format (keyed by schema name)
         # relevant_schemas_ids is a set of schema IDs, need to convert to dict format

@@ -127,7 +127,10 @@ def route_decision(state: AgentState) -> str:
 
     mapped = decision_mapping.get(decision, decision)
 
-    if decision != mapped:
+    if not mapped:
+        logger.warning("Empty decision — defaulting to 'unconstructable'")
+        mapped = "unconstructable"
+    elif decision != mapped:
         logger.debug("Mapped decision '%s' → '%s'", decision, mapped)
 
     return mapped
