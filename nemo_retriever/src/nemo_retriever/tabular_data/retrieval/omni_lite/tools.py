@@ -169,8 +169,8 @@ def _compact_schema(retrieval_ctx: RetrievalContext) -> str:
     """Return a compact schema summary for LLM prompts."""
     lines: list[str] = []
     for t in retrieval_ctx.get("relevant_tables") or []:
-        name = t.get("name") or ""
-        schema = t.get("schema") or ""
+        name = t.get("table_name") or t.get("name") or ""
+        schema = t.get("schema_name") or ""
         fqn = f"{schema}.{name}" if schema else name
         cols = []
         for col in t.get("columns") or []:
@@ -195,7 +195,7 @@ def _make_plan_query_tool(store: SqlGenerationStore, llm: Any):
         """Plan the SQL query structure from the RetrievalContext.
 
         Call this as the FIRST step.  The tool reads the question and the full
-        RetrievalContext from the store automatically — no arguments needed.
+        RetrievalContext from the store automatically.
 
         Produces a structured query plan (tables, joins, select expressions,
         WHERE conditions, GROUP BY, ORDER BY, CTE flag) and stores it
@@ -228,7 +228,7 @@ Entities identified:
 Available tables (schema.table: [columns]):
 {_compact_schema(ctx)}
 
-Foreign-key relationships (use ONLY these for JOINs):
+Foreign-key relationships:
 {chr(10).join(fk_lines) or "  (none)"}
 
 Certified SQL snippets / custom analyses (highest-priority reference):
@@ -238,7 +238,6 @@ coverage_complete: {ctx.get('coverage_complete', False)}
 
 Rules:
 - Use ONLY tables listed above.  Never reference unlisted tables.
-- Use ONLY FK relationships listed for JOINs.  Never invent join conditions.
 - For entities with resolved_as="expression", embed their sql_expression directly.
 - If coverage_complete=false, note which entity is unresolved in the notes field.
 - Prefer certified SQL snippets as structural references when available.
