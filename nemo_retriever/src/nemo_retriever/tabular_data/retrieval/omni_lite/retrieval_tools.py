@@ -143,7 +143,13 @@ class RetrievalStore:
 
 
 class _EntityItem(BaseModel):
-    term: str = Field(..., description="The entity/concept term as it appears in the question.")
+    term: str = Field(
+        ...,
+        description=(
+            "A semantic concept or phrase from the question — may be multiple words. "
+            "Never split a multi-word concept into individual words."
+        ),
+    )
     entity_type: Literal["metric", "dimension", "time_filter", "value"] = Field(
         ...,
         description=(
@@ -216,31 +222,31 @@ def _make_decompose_question_tool(llm: Any, store: RetrievalStore):
         Args:
             question: The raw user question.
         """
-        prompt = f"""You are extracting entities and concepts from a user question for database retrieval.
+        prompt = f"""You are extracting database-retrieval entities from a user question.
 
 User Question:
 {question}
 
-Classify EVERY meaningful term as one of:
-- metric: a measurable value the user wants to compute (revenue, profit, count, avg, total …)
-- dimension: a schema concept that maps to a DB table or column (student, product, order, customer …)
-- time_filter: a time period or date (last month, Q1 2024, this year, yesterday …)
-- value: a SPECIFIC NAMED LITERAL that will become a WHERE clause filter value.
-  Examples: 'Seattle' in "students from Seattle" → value (city='Seattle'),
-            'Enterprise' in "enterprise customers" → value (tier='Enterprise').
-  Key: if the term is a PROPER NOUN or SPECIFIC NAMED INSTANCE rather than a general
-  concept/field name, it is a value, not a dimension.
+CRITICAL RULE — extract SEMANTIC CONCEPTS, not individual words:
+- Merge adjacent words that together describe a single DB concept into one entity.
+- Numeric thresholds and qualifiers belong WITH the concept they modify — do not split them out.
+- A multi-word phrase that maps to a single table, column, or measurable concept is ONE entity.
 
-Assign a priority (integer, lower = retrieved first):
-1 = primary subject (the main thing being queried: "students", "orders", "products")
-2 = grouping/join dimension (related objects: "department", "category", "region")
-3 = filter attribute concept (field concept used to narrow: "city", "status", "tier")
-4 = filter value or time period (specific literal: "Seattle", "last month", "Active")
+Entity types:
+- metric: a measurable value or aggregate the user wants to compute
+- dimension: a schema object — table or column concept
+- time_filter: a time period or date expression
+- value: a SPECIFIC NAMED LITERAL for a WHERE clause — only proper nouns or named instances
 
-For filter_field_hint: only for value entities. State the field the value filters on.
-E.g. entity='Seattle' → filter_field_hint='city'.
+Priority (lower = retrieved first):
+1 = primary subject being queried
+2 = related object / join target
+3 = filter attribute concept
+4 = filter value or time literal
 
-Order the entities list by priority ascending in your output."""
+For value entities only: set filter_field_hint to the field concept being filtered.
+
+Order entities by priority ascending in your output."""
 
         messages = [SystemMessage(content=prompt)]
         result = invoke_with_structured_output(llm, messages, _DecomposeResult)
