@@ -51,9 +51,7 @@ def get_schemas_ids_and_names(db_id: str = None, db_name: str = None):
     query = f"""MATCH(db:{Labels.DB}{db_filter})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
                 RETURN s.name as schema_name, s.id as schema_id
             """
-    result = pd.DataFrame(
-        get_neo4j_conn().query_read(query=query, parameters=params)
-    )
+    result = pd.DataFrame(get_neo4j_conn().query_read(query=query, parameters=params))
     return result.to_dict(orient="records")
 
 
