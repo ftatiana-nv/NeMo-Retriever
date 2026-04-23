@@ -79,7 +79,10 @@ class SQLFromTablesAgent(BaseAgent):
         # Get relevant tables (search if not already available)
         relevant_tables = path_state.get("relevant_tables", [])
         if not relevant_tables:
-            relevant_tables, _ = get_relevant_tables(question)
+            relevant_tables, _ = get_relevant_tables(
+                state["retriever"],
+                question,
+            )
 
         # Find similar questions from conversation history
         similar_questions = []

@@ -77,6 +77,7 @@ class CandidateRetrievalAgent(BaseAgent):
             query_no_values = path_state.get("query_no_values", "")
 
             extracted = extract_candidates(
+                state["retriever"],
                 entities,
                 query_no_values,
                 question,

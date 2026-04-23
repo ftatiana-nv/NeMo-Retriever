@@ -101,6 +101,7 @@ class CandidatePreparationAgent(BaseAgent):
         relevant_tables, relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
 
         additional_tables, additional_fks = get_relevant_tables(
+            state["retriever"],
             question,
             k=5,
         )
@@ -119,10 +120,7 @@ class CandidatePreparationAgent(BaseAgent):
         )
         self.logger.info(f"Found {len(relevant_queries)} relevant queries")
 
-        custom_analyses = [
-            x for x in candidates
-            if x.get("label") == Labels.CUSTOM_ANALYSIS
-        ]
+        custom_analyses = [x for x in candidates if x.get("label") == Labels.CUSTOM_ANALYSIS]
         self.logger.info(f"Filtered {len(custom_analyses)} custom analyses")
 
         custom_analyses_str = self._build_custom_analyses_str(custom_analyses)
@@ -142,9 +140,7 @@ class CandidatePreparationAgent(BaseAgent):
 
     def _build_custom_analyses_str(self, custom_analyses: list) -> list[str]:
         """Build string representation of custom analyses for prompts."""
-        sorted_analyses = sorted(
-            custom_analyses, key=lambda c: -c.get("score", 0)
-        )
+        sorted_analyses = sorted(custom_analyses, key=lambda c: -c.get("score", 0))
 
         return [
             f"name: {x['name']}, label: {x['label']}, id: {x['id']}"

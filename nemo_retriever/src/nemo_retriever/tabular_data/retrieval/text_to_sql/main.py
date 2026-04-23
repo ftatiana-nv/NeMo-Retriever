@@ -37,6 +37,13 @@ def get_agent_response(payload: AgentPayload):
 
     initial_path_state = dict(payload.get("path_state") or {})
 
+    retriever = payload.get("retriever")
+    if retriever is None:
+        raise ValueError(
+            "AgentPayload is missing required 'retriever' (nemo_retriever.retriever.Retriever "
+            "instance). Construct a Retriever once at startup and pass it in the payload."
+        )
+
     state: AgentState = {
         "llm": llm_client,
         "initial_question": payload["question"],
@@ -45,6 +52,7 @@ def get_agent_response(payload: AgentPayload):
         "messages": messages,
         "decision": "",
         "path_state": initial_path_state,
+        "retriever": retriever,
     }
 
     final_state = state.copy()

@@ -341,64 +341,14 @@ def _hits_to_semantic_rows(hits: list[dict], _allowed_labels: set[str], k: int) 
     return rows[: int(k)]
 
 
-def _t2s_retriever_init_kwargs(
-    uri: str,
-    table_name: str,
-    top_k: int,
-) -> dict:
-    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever`.
-
-    When ``T2S_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
-    query embeddings go to that HTTP NIM / OpenAI-compatible API (same pattern as
-    ``EmbedParams.embed_invoke_url`` in tabular ingest) instead of loading the HF model locally.
-    """
-    kwargs: dict = {
-        "lancedb_uri": uri,
-        "lancedb_table": table_name,
-        "top_k": top_k,
-    }
-    http_ep = (os.environ.get("T2S_EMBEDDING_HTTP_ENDPOINT") or "").strip() or (
-        os.environ.get("EMBEDDING_HTTP_ENDPOINT") or ""
-    ).strip()
-    if http_ep:
-        kwargs["embedding_http_endpoint"] = http_ep
-        kwargs["embedding_api_key"] = (os.environ.get("NVIDIA_API_KEY") or "").strip()
-    model = (os.environ.get("T2S_EMBEDDER_MODEL") or "").strip()
-    if model:
-        kwargs["embedder"] = model
-    return kwargs
-
-
-_t2s_retriever_cache: dict[tuple[str, str], "Retriever"] = {}
-
-
-def _get_t2s_retriever(uri: str, table_name: str, top_k: int) -> "Retriever":
-    """Return a cached :class:`~nemo_retriever.retriever.Retriever`, creating one on first call.
-
-    The retriever is keyed by ``(uri, table_name)`` so the expensive embedding
-    model weights are loaded only once.  ``top_k`` is updated on the cached
-    instance before it is returned (cheap attribute assignment).
-    """
-    from nemo_retriever.retriever import Retriever
-
-    key = (uri, table_name)
-    retriever = _t2s_retriever_cache.get(key)
-    if retriever is None:
-        retriever = Retriever(
-            **_t2s_retriever_init_kwargs(uri, table_name, top_k),
-        )
-        _t2s_retriever_cache[key] = retriever
-    retriever.top_k = top_k
-    return retriever
-
-
 def search_lancedb_semantic_index(
+    retriever: "Retriever",
     entity: str,
     k: int = 30,
     label_filter: list[str] | None = None,
 ) -> list[dict]:
     """
-    Vector search over LanceDB via :class:`~nemo_retriever.retriever.Retriever`
+    Vector search over LanceDB via the injected :class:`~nemo_retriever.retriever.Retriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
     ``Retriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
@@ -406,25 +356,17 @@ def search_lancedb_semantic_index(
     ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
 
-    Env — LanceDB: ``T2S_LANCEDB_URI`` (default ``lancedb``),
-    ``T2S_LANCEDB_TABLE`` (default ``nv-ingest-tabular``).
-
-    Env — **remote embeddings** (optional, avoids local HF load): set
-    ``T2S_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) to e.g.
-    ``https://integrate.api.nvidia.com/v1``, and ``NVIDIA_API_KEY`` for the hosted API.
-    Optional: ``T2S_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
+    The retriever's ``lancedb_uri`` / ``lancedb_table`` / ``embedder`` / embedding
+    endpoint and credentials are fully decided at retriever construction time;
+    this function does not read any environment variables.
     """
-    uri = os.environ.get("T2S_LANCEDB_URI", "lancedb")
-    table_name = os.environ.get("T2S_LANCEDB_TABLE", "nv-ingest-tabular")
     allowed_labels = {str(x) for x in (label_filter or []) if x is not None}
     limit = max(1, int(k))
 
-    retriever = _get_t2s_retriever(uri, table_name, limit)
+    retriever.top_k = limit
 
     hits = retriever.query(
         entity,
-        lancedb_uri=uri,
-        lancedb_table=table_name,
         label_in=sorted(allowed_labels) if allowed_labels else None,
     )
 
@@ -432,6 +374,7 @@ def search_lancedb_semantic_index(
 
 
 def get_candidates_information(
+    retriever: "Retriever",
     entity: str,
     k: int = 5,
     threshold: float = 0,
@@ -444,7 +387,7 @@ def get_candidates_information(
     ``<-[:schema]-``), same shape as :func:`get_relevant_tables` / ``_normalize_table_to_relevant_shape``.
 
     Matches the call shape used by ``extract_candidates``:
-    ``get_candidates_information(text, k=..., list_of_semantic=[...])``.
+    ``get_candidates_information(retriever, text, k=..., list_of_semantic=[...])``.
     """
     if list_of_semantic is None:
         list_of_semantic = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN]
@@ -452,6 +395,7 @@ def get_candidates_information(
     results: list[dict] = []
 
     nodes_results = search_lancedb_semantic_index(
+        retriever,
         entity,
         k=k,
         label_filter=labels,
@@ -497,6 +441,7 @@ def _dedupe_best_score_sort_cap(combined: list[dict]) -> list[dict]:
 
 
 def extract_candidates(
+    retriever: "Retriever",
     entities: list[str],
     query_no_values: str,
     query_with_values: str = "",
@@ -525,6 +470,7 @@ def extract_candidates(
     for text in pulls:
         combined_custom.extend(
             get_candidates_information(
+                retriever,
                 text,
                 k=CANDIDATES_K,
                 list_of_semantic=[Labels.CUSTOM_ANALYSIS],
@@ -533,6 +479,7 @@ def extract_candidates(
         )
         combined_columns.extend(
             get_candidates_information(
+                retriever,
                 text,
                 k=CANDIDATES_K,
                 list_of_semantic=[Labels.COLUMN],
@@ -1175,12 +1122,14 @@ def get_relevant_fks_from_candidates_tables(
 
 
 def get_relevant_tables(
+    retriever: "Retriever",
     initial_question,
     k=15,
 ):
     """Semantic search over the same LanceDB index as candidate retrieval, label ``table`` only."""
     try:
         raw_rows = search_lancedb_semantic_index(
+            retriever,
             initial_question,
             k=k,
             label_filter=[Labels.TABLE],

@@ -12,11 +12,14 @@ from typing import Any, NotRequired, TypedDict
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
+from nemo_retriever.retriever import Retriever
+
 
 class AgentPayload(TypedDict):
     """Payload received from the API."""
 
     question: str
+    retriever: Retriever
     path_state: NotRequired[dict]
     dialect: NotRequired[str]
     connector: NotRequired[Any]
@@ -32,6 +35,7 @@ class AgentState(TypedDict):
     dialect: str
     connector: Any
     path_state: dict
+    retriever: Retriever
 
 
 def get_question_for_processing(state: AgentState) -> str:
