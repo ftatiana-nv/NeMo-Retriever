@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override import TextToSqlRetriever
+    from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 import pandas as pd
@@ -346,7 +346,7 @@ def _t2s_retriever_init_kwargs(
     table_name: str,
     top_k: int,
 ) -> dict:
-    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``TextToSqlRetriever``.
+    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever`.
 
     When ``T2S_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
     query embeddings go to that HTTP NIM / OpenAI-compatible API (same pattern as
@@ -369,22 +369,22 @@ def _t2s_retriever_init_kwargs(
     return kwargs
 
 
-_t2s_retriever_cache: dict[tuple[str, str], TextToSqlRetriever] = {}
+_t2s_retriever_cache: dict[tuple[str, str], "Retriever"] = {}
 
 
-def _get_t2s_retriever(uri: str, table_name: str, top_k: int) -> TextToSqlRetriever:
-    """Return a cached ``TextToSqlRetriever``, creating one on first call.
+def _get_t2s_retriever(uri: str, table_name: str, top_k: int) -> "Retriever":
+    """Return a cached :class:`~nemo_retriever.retriever.Retriever`, creating one on first call.
 
     The retriever is keyed by ``(uri, table_name)`` so the expensive embedding
     model weights are loaded only once.  ``top_k`` is updated on the cached
     instance before it is returned (cheap attribute assignment).
     """
-    from nemo_retriever.tabular_data.retrieval.text_to_sql.retrieval_override import TextToSqlRetriever
+    from nemo_retriever.retriever import Retriever
 
     key = (uri, table_name)
     retriever = _t2s_retriever_cache.get(key)
     if retriever is None:
-        retriever = TextToSqlRetriever(
+        retriever = Retriever(
             **_t2s_retriever_init_kwargs(uri, table_name, top_k),
         )
         _t2s_retriever_cache[key] = retriever
@@ -398,11 +398,10 @@ def search_lancedb_semantic_index(
     label_filter: list[str] | None = None,
 ) -> list[dict]:
     """
-    Vector search over LanceDB via
-    :class:`~...retrieval.text_to_sql.retrieval_override.TextToSqlRetriever`
+    Vector search over LanceDB via :class:`~nemo_retriever.retriever.Retriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
-    ``TextToSqlRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
+    ``Retriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
     (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
     ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
