@@ -249,8 +249,7 @@ def _dict_to_sql_result(d: dict | None) -> dict:
 
 
 def get_sql_tool_response_top_k(
-    question: str,
-    top_k: int = 15,
+    question: str, embedding_api_key: str = "", top_k: int = 15
 ) -> dict:
     """Retrieve top_k tables from LanceDB, then generate SQL via LLM (JSON schema + markdown fallbacks).
 
@@ -261,6 +260,8 @@ def get_sql_tool_response_top_k(
     retriever = Retriever(
         lancedb_table="nv-ingest-tabular",
         top_k=top_k,
+        embedding_api_key=embedding_api_key,
+        embedding_http_endpoint="https://integrate.api.nvidia.com/v1",
     )
     hits = retriever.query(question)
 
