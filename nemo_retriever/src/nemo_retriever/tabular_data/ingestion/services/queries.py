@@ -25,6 +25,7 @@ from nemo_retriever.tabular_data.ingestion.model.query import Query
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
     ExtractionResult,
+    JoinPair,
     extract_tables_and_columns,
 )
 from nemo_retriever.tabular_data.ingestion.parsers.query_comparator import (
@@ -35,13 +36,23 @@ from nemo_retriever.tabular_data.ingestion.parsers.query_comparator import (
 logger = logging.getLogger(__name__)
 
 
+def _find_schema_for_table(bare_name: str, match_schema_name: str | None, schemas: dict):
+    """Return the ``Schema`` object owning *bare_name*, or ``None``."""
+    schema = schemas.get(match_schema_name) if match_schema_name else None
+    if schema is None:
+        for s in schemas.values():
+            if s.table_exists(bare_name):
+                return s
+    return schema
+
+
 def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dict) -> bool:
     """Parse a SQL query using sqlglot extraction.
 
     Identifies referenced tables and columns for all SQL statement types without
-    building a full AST.  Updates ``query_obj.tables_ids`` and appends SQL→table
-    and SQL→column edges to ``query_obj.edges``.  Also stores the sqlglot AST
-    node count on the query as a cheap structural fingerprint.
+    building a full AST.  Updates ``query_obj.tables_ids`` and appends SQL→table,
+    SQL→column, and Column→Column JOIN edges to ``query_obj.edges``.  Also stores
+    the sqlglot AST node count on the query as a cheap structural fingerprint.
 
     Returns True when at least one recognised table was found, False otherwise.
     """
@@ -56,22 +67,18 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
     if not extraction.tables:
         return False
 
+    # table_key → (schema, bare_name) — reused for JOIN edge creation.
+    table_schema_map: dict[str, tuple] = {}
+
     for table_key, match in extraction.tables.items():
-        # table_key may be "schema.table" or just "table"; bare name is always the last part.
         bare_name = table_key.split(".")[-1]
 
-        # Use the schema identified by the extractor directly; fall back to scanning
-        # all schemas when the owning schema could not be determined.
-        schema = schemas.get(match.schema_name) if match.schema_name else None
-        if schema is None:
-            for s in schemas.values():
-                if s.table_exists(bare_name):
-                    schema = s
-                    break
-
+        schema = _find_schema_for_table(bare_name, match.schema_name, schemas)
         if schema is None:
             logger.debug("Table %r not found in any schema – skipping.", bare_name)
             continue
+
+        table_schema_map[table_key] = (schema, bare_name)
 
         try:
             table_node = schema.get_table_node(bare_name)
@@ -90,6 +97,32 @@ def parse_query_slim(sql_text: str, query_obj: Query, dialect: str, schemas: dic
                     query_obj.edges.append((query_obj.sql_node, col_node, edge_props))
             except Exception:
                 continue
+
+    # Column→Column JOIN edges.
+    for jp in extraction.joins:
+        left_entry = table_schema_map.get(jp.left_table)
+        right_entry = table_schema_map.get(jp.right_table)
+        if not left_entry or not right_entry:
+            continue
+        left_schema, left_bare = left_entry
+        right_schema, right_bare = right_entry
+        try:
+            left_tbl_node = left_schema.get_table_node(left_bare)
+            right_tbl_node = right_schema.get_table_node(right_bare)
+            if not (
+                left_schema.is_column_in_table(left_tbl_node, jp.left_column)
+                and right_schema.is_column_in_table(right_tbl_node, jp.right_column)
+            ):
+                continue
+            left_col_node = left_schema.get_column_node(jp.left_column, left_bare)
+            right_col_node = right_schema.get_column_node(jp.right_column, right_bare)
+            query_obj.edges.append((
+                left_col_node,
+                right_col_node,
+                {Props.JOIN: "equi_join", "join_sql_id": [str(query_obj.id)]},
+            ))
+        except Exception:
+            continue
 
     return bool(query_obj.get_tables_ids())
 

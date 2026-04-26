@@ -8,6 +8,7 @@ attribute consumed by ``extract_tables_and_columns``.
 import pandas as pd
 
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
+    JoinPair,
     TableMatch,
     extract_tables_and_columns,
 )
@@ -230,3 +231,237 @@ def test_empty_sql_returns_empty():
 def test_invalid_sql_returns_empty():
     result = extract_tables_and_columns("NOT VALID SQL !!!", all_schemas=_ALL_SCHEMAS)
     assert result.tables == {}
+
+
+# ---------------------------------------------------------------------------
+# JOIN extraction tests
+# ---------------------------------------------------------------------------
+
+# Schema for ON-based join tests with different column names.
+_JOIN_SCHEMA = _MockSchema(
+    [
+        {"table_name": "orders", "column_name": "order_id"},
+        {"table_name": "orders", "column_name": "customer_id"},
+        {"table_name": "orders", "column_name": "total"},
+        {"table_name": "customers", "column_name": "id"},
+        {"table_name": "customers", "column_name": "customer_id"},
+        {"table_name": "customers", "column_name": "name"},
+        {"table_name": "order_items", "column_name": "order_id"},
+        {"table_name": "order_items", "column_name": "price"},
+        {"table_name": "order_payments", "column_name": "order_id"},
+        {"table_name": "order_payments", "column_name": "payment_value"},
+        {"table_name": "products", "column_name": "product_id"},
+        {"table_name": "products", "column_name": "name"},
+        {"table_name": "order_items", "column_name": "product_id"},
+    ]
+)
+_JOIN_SCHEMAS = {"ecommerce": _JOIN_SCHEMA}
+
+
+def _jp_set(pairs: list[JoinPair]) -> set[tuple[str, str, str, str]]:
+    """Normalise join pairs to a set of tuples for order-insensitive comparison."""
+    result = set()
+    for jp in pairs:
+        key = (jp.left_table, jp.left_column, jp.right_table, jp.right_column)
+        result.add(key)
+    return result
+
+
+def test_using_join_extracts_pairs():
+    """USING-based join produces the expected column pairs."""
+    sql = """
+        SELECT o.order_id, c.name
+        FROM orders o
+            JOIN customers c USING (customer_id)
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    assert ("orders", "customer_id", "customers", "customer_id") in pairs or (
+        "customers",
+        "customer_id",
+        "orders",
+        "customer_id",
+    ) in pairs
+
+
+def test_on_join_same_column_name():
+    """ON t1.col = t2.col is extracted correctly."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN order_items oi ON o.order_id = oi.order_id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    assert ("orders", "order_id", "order_items", "order_id") in pairs or (
+        "order_items",
+        "order_id",
+        "orders",
+        "order_id",
+    ) in pairs
+
+
+def test_on_join_different_column_names():
+    """ON t1.col_a = t2.col_b with different column names is extracted."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN customers c ON o.customer_id = c.id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    found = (
+        ("orders", "customer_id", "customers", "id") in pairs
+        or ("customers", "id", "orders", "customer_id") in pairs
+    )
+    assert found, f"Expected customer_id=id join pair, got {pairs}"
+
+
+def test_multi_table_join_chain():
+    """A three-way join chain extracts pairs for each explicit JOIN."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN order_items oi ON o.order_id = oi.order_id
+            JOIN products p ON oi.product_id = p.product_id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    assert len(pairs) >= 2
+
+
+def test_compound_on_condition():
+    """ON with multiple AND-ed equalities produces multiple pairs."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN order_items oi ON o.order_id = oi.order_id AND o.customer_id = oi.product_id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    assert len(result.joins) >= 2
+
+
+def test_no_join_returns_empty():
+    """A simple SELECT without JOIN produces no join pairs."""
+    sql = "SELECT order_id, total FROM orders"
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    assert result.joins == []
+
+
+def test_rfm_query_joins():
+    """The RFM query produces join pairs for customer_id and order_id."""
+    result = extract_tables_and_columns(_SQL_RFM, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    col_names_in_joins = {(jp.left_column, jp.right_column) for jp in result.joins}
+    col_names_flat = {c for pair in col_names_in_joins for c in pair}
+    assert "customer_id" in col_names_flat
+    assert "order_id" in col_names_flat
+
+
+def test_clv_query_joins():
+    """The CLV query produces join pairs for customer_id and order_id."""
+    result = extract_tables_and_columns(_SQL_CLV, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    col_names_flat = {c for jp in result.joins for c in (jp.left_column, jp.right_column)}
+    assert "customer_id" in col_names_flat
+    assert "order_id" in col_names_flat
+
+
+def test_join_pairs_are_deduplicated():
+    """Same join condition appearing in two CTEs is deduplicated."""
+    sql = """
+        WITH a AS (
+            SELECT * FROM orders o JOIN customers c USING (customer_id)
+        ),
+        b AS (
+            SELECT * FROM orders o2 JOIN customers c2 USING (customer_id)
+        )
+        SELECT * FROM a, b
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    customer_pairs = [
+        jp for jp in result.joins if "customer_id" in (jp.left_column, jp.right_column)
+    ]
+    assert len(customer_pairs) == 1, f"Expected 1 deduplicated pair, got {customer_pairs}"
+
+
+def test_function_wrapped_columns_in_on():
+    """LOWER(t1.col) = LOWER(t2.col) extracts the underlying columns."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN customers c ON LOWER(o.customer_id) = LOWER(c.customer_id)
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    found = (
+        ("orders", "customer_id", "customers", "customer_id") in pairs
+        or ("customers", "customer_id", "orders", "customer_id") in pairs
+    )
+    assert found, f"Expected customer_id pair from wrapped columns, got {pairs}"
+
+
+def test_non_equi_join_gt():
+    """Greater-than join condition is extracted."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN order_items oi ON o.order_id > oi.order_id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    found = (
+        ("orders", "order_id", "order_items", "order_id") in pairs
+        or ("order_items", "order_id", "orders", "order_id") in pairs
+    )
+    assert found, f"Expected order_id pair from > condition, got {pairs}"
+
+
+def test_between_join_condition():
+    """BETWEEN with column bounds extracts pairs for both low and high."""
+    _between_schema = _MockSchema(
+        [
+            {"table_name": "events", "column_name": "event_date"},
+            {"table_name": "periods", "column_name": "start_date"},
+            {"table_name": "periods", "column_name": "end_date"},
+        ]
+    )
+    sql = """
+        SELECT *
+        FROM events e
+            JOIN periods p ON e.event_date BETWEEN p.start_date AND p.end_date
+    """
+    result = extract_tables_and_columns(
+        sql, dialect="duckdb", all_schemas={"main": _between_schema}
+    )
+    assert len(result.joins) == 2, f"Expected 2 pairs from BETWEEN, got {result.joins}"
+    col_names = {(jp.left_column, jp.right_column) for jp in result.joins}
+    col_names |= {(jp.right_column, jp.left_column) for jp in result.joins}
+    assert ("event_date", "start_date") in col_names
+    assert ("event_date", "end_date") in col_names
+
+
+def test_cast_wrapped_column_in_on():
+    """CAST(col AS type) is unwrapped to extract the column."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN customers c ON CAST(o.customer_id AS VARCHAR) = CAST(c.customer_id AS VARCHAR)
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    pairs = _jp_set(result.joins)
+    found = (
+        ("orders", "customer_id", "customers", "customer_id") in pairs
+        or ("customers", "customer_id", "orders", "customer_id") in pairs
+    )
+    assert found, f"Expected customer_id pair from CAST-wrapped columns, got {pairs}"
+
+
+def test_literal_filter_in_on_ignored():
+    """ON t1.col = 'literal' does not produce a join pair (no column on right)."""
+    sql = """
+        SELECT *
+        FROM orders o
+            JOIN customers c ON o.customer_id = c.customer_id AND o.order_id = '123'
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_JOIN_SCHEMAS)
+    for jp in result.joins:
+        assert jp.left_column != "order_id" or jp.right_column != "123"
