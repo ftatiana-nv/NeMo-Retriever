@@ -78,7 +78,7 @@ class Schema:
                     self.columns_map[row["table_name_lower"]] = {}
                 self.columns_map[row["table_name_lower"]][row["column_name_lower"]] = True
 
-            if is_creation_mode: # ingestion mode
+            if is_creation_mode:  # ingestion mode
                 self.reset_tables_props()
                 self.reset_columns_props()
             else:
