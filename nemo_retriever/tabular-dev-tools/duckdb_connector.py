@@ -124,7 +124,7 @@ class DuckDB(SQLDatabase):
         whose name is derived from the database file (e.g. ``spider2.duckdb``
         → ``sample_spider2_queries.csv``)."""
         db_stem = Path(self._connection_string).stem
-        csv_path = Path(__file__).parent / f"sample_{db_stem}_queries.csv"
+        csv_path = Path(__file__).parent / "benchmarks" / db_stem / "sample_queries.csv"
         if not csv_path.exists():
             logger.warning("No sample queries CSV found at %s; returning empty DataFrame.", csv_path)
             return pd.DataFrame(columns=["query_text", "end_time"])
