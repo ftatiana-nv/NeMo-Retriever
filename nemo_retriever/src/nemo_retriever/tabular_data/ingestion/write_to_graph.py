@@ -24,6 +24,7 @@ from nemo_retriever.tabular_data.ingestion.dal.schemas_dal import (
     reset_pks,
 )
 from nemo_retriever.tabular_data.ingestion.services.schema import add_schema
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def populate_db(tables_df, columns_df, database, num_workers):
             add_schema(schema, latest_timestamp, num_workers)
             logger.info(f"Added schema {schema_name} to db.")
 
-        update_node_property("db", str(db_node.get_id()), {"pulled": latest_timestamp})
+        update_node_property(Labels.DB, str(db_node.get_id()), {"pulled": latest_timestamp})
 
         logger.info(f"Time took to add schemas:{time.time() - before_adding_schemas}")
         return schemas
@@ -120,7 +121,7 @@ def populate_db(tables_df, columns_df, database, num_workers):
 
     logger.info(f"Time took to update schemas:{time.time() - before_adding_schema}")
 
-    update_node_property("db", existing_db_id, {"pulled": latest_timestamp})
+    update_node_property(Labels.DB, existing_db_id, {"pulled": latest_timestamp})
     return schemas
 
 
