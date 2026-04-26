@@ -241,14 +241,14 @@ def add_fks(fks_df, last_seen):
     # pk_database_name, pk_schema_name, pk_table_name, pk_column_name
     # fk_database_name, fk_schema_name, fk_table_name, fk_column_name
     query = f"""UNWIND $fks_dict as fkd
-               MATCH (t1:{Labels.TABLE}{{
-                   name: fkd.pk_table_name, schema_name: fkd.pk_schema_name,
-                   db_name: fkd.pk_database_name
-               }})-[:{Edges.CONTAINS}]->(col1:{Labels.COLUMN}{{name: fkd.pk_column_name}})
-               MATCH (t2:{Labels.TABLE}{{
-                   name: fkd.fk_table_name, schema_name: fkd.fk_schema_name,
-                   db_name: fkd.fk_database_name
-               }})-[:{Edges.CONTAINS}]->(col2:{Labels.COLUMN}{{name: fkd.fk_column_name}})
+               MATCH (:{Labels.DB}{{name: fkd.pk_database_name}})-[:{Edges.CONTAINS}]->
+                     (:{Labels.SCHEMA}{{name: fkd.pk_schema_name}})-[:{Edges.CONTAINS}]->
+                     (t1:{Labels.TABLE}{{name: fkd.pk_table_name}})-[:{Edges.CONTAINS}]->
+                     (col1:{Labels.COLUMN}{{name: fkd.pk_column_name}})
+               MATCH (:{Labels.DB}{{name: fkd.fk_database_name}})-[:{Edges.CONTAINS}]->
+                     (:{Labels.SCHEMA}{{name: fkd.fk_schema_name}})-[:{Edges.CONTAINS}]->
+                     (t2:{Labels.TABLE}{{name: fkd.fk_table_name}})-[:{Edges.CONTAINS}]->
+                     (col2:{Labels.COLUMN}{{name: fkd.fk_column_name}})
                MERGE (col1)-[:{Edges.FOREIGN_KEY} {{last_seen: $last_seen}}]->(col2)"""
     get_neo4j_conn().query_write(
         query=query,
@@ -268,10 +268,10 @@ def reset_pks():
 def add_pks(pks_df):
     # database_name, schema_name, table_name, column_name
     query = f"""UNWIND $pks_dict as pkd
-               MATCH (t:{Labels.TABLE}{{
-                   name: pkd.table_name, schema_name: pkd.schema_name,
-                   db_name: pkd.database_name
-               }})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN}{{name: pkd.column_name}})
+               MATCH (:{Labels.DB}{{name: pkd.database_name}})-[:{Edges.CONTAINS}]->
+                     (:{Labels.SCHEMA}{{name: pkd.schema_name}})-[:{Edges.CONTAINS}]->
+                     (t:{Labels.TABLE}{{name: pkd.table_name}})-[:{Edges.CONTAINS}]->
+                     (col:{Labels.COLUMN}{{name: pkd.column_name}})
                SET t.pk = CASE WHEN t.pk is NULL THEN [col.name] ELSE t.pk + [col.name] END"""
     get_neo4j_conn().query_write(
         query=query,

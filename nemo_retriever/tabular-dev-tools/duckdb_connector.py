@@ -145,72 +145,11 @@ class DuckDB(SQLDatabase):
         """
         )
 
-    # Todo: Test as Spider2 has no PKs
     def get_pks(self) -> pd.DataFrame:
-        """Return primary key columns from duckdb_constraints() as a DataFrame.
+        pass
 
-        Columns: table_schema, table_name, column_name, ordinal_position.
-        If duckdb_constraints() is unavailable, returns an empty DataFrame with those columns.
-        """
-        empty = pd.DataFrame(
-            columns=[
-                "table_schema",
-                "table_name",
-                "column_name",
-                "ordinal_position",
-            ]
-        )
-        try:
-            # duckdb_constraints() returns constraint_column_names as list; unnest to one row per column
-            df = self.execute(
-                """
-                SELECT
-                    c.schema_name      AS "table_schema",
-                    c.table_name       AS "table_name",
-                    unnest(c.constraint_column_names) AS "column_name",
-                    unnest(range(1, len(c.constraint_column_names) + 1)) AS "ordinal_position"
-                FROM duckdb_constraints() c
-                WHERE c.constraint_type = 'PRIMARY KEY'
-                ORDER BY c.schema_name, c.table_name, "ordinal_position"
-            """
-            )
-            return df if not df.empty else empty
-        except Exception:
-            return empty
-
-    # Todo: Test as Spider2 has no FKs
     def get_fks(self) -> pd.DataFrame:
-        """Return foreign key columns from duckdb_constraints() as a DataFrame.
-
-        Columns: table_schema, table_name, column_name, and referenced_* if available.
-        If duckdb_constraints() is unavailable, returns an empty DataFrame with standard columns.
-        """
-        empty = pd.DataFrame(
-            columns=[
-                "table_schema",
-                "table_name",
-                "column_name",
-                "referenced_schema",
-                "referenced_table",
-                "referenced_column",
-            ]
-        )
-        try:
-            df = self.execute(
-                """
-                SELECT
-                    c.schema_name      AS "table_schema",
-                    c.table_name       AS "table_name",
-                    unnest(c.constraint_column_names) AS "column_name"
-                FROM duckdb_constraints() c
-                WHERE c.constraint_type = 'FOREIGN KEY'
-                ORDER BY c.schema_name, c.table_name
-            """
-            )
-
-            return df if not df.empty else empty
-        except Exception:
-            return empty
+       pass
 
     # ------------------------------------------------------------------
     # Context manager / cleanup
