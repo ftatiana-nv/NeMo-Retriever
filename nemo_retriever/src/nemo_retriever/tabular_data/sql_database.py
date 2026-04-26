@@ -50,10 +50,6 @@ class SQLDatabase(ABC):
         dialect-appropriate SQL.
     """
 
-    #: SQL dialect reported by this connector.  Subclasses should override
-    #: this in ``__init__`` when a different dialect is required.
-    dialect: str = "sqlite"
-
     @abstractmethod
     def __init__(self, connection_string: str, *, dialect: str = "sqlite") -> None: ...
 
