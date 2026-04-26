@@ -61,7 +61,7 @@ def get_schema_columns(db_name, schema_name):
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{Edges.CONTAINS}]->
                 (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
                 WITH d.name as database,
-                s.name as schema,
+                s.name as table_schema,
                 t.name as table_name,
                 c.name as column_name,
                 c.id as c_id,
@@ -69,7 +69,7 @@ def get_schema_columns(db_name, schema_name):
                 c.is_nullable as is_nullable
                 RETURN collect({{
                     database: database,
-                    schema: schema,
+                    table_schema: table_schema,
                     table_name: table_name,
                     column_name: column_name,
                     id: c_id,
@@ -93,10 +93,10 @@ def get_schema_tables(db_name, schema_name):
     query = f"""MATCH (d:{Labels.DB}{{name:$db_name}})-[:{Edges.CONTAINS}]->
                 (s:{Labels.SCHEMA}{{name:$schema_name}})-[:{Edges.CONTAINS}]->
                 (t:{Labels.TABLE})
-                WITH d.name as database, s.name as schema, t.name as table_name, t.id as t_id,
+                WITH d.name as database, s.name as table_schema, t.name as table_name, t.id as t_id,
                 tostring(t.created) as created, t.description as description
                 RETURN collect({{
-                    database: database, schema: schema, table_name: table_name,
+                    database: database, table_schema: table_schema, table_name: table_name,
                     id:t_id, created: created, description: description
                 }}) as tables
                 """
@@ -109,6 +109,75 @@ def get_schema_tables(db_name, schema_name):
     )
     # Neo4j collect() returns a list; normalize_tables expects a DataFrame
     return normalize_tables(pd.DataFrame(res[0]["tables"] if res[0]["tables"] else []))
+
+
+def get_table_ids(tables_df: pd.DataFrame, database_name: str) -> pd.DataFrame:
+    """Look up graph node IDs for the tables listed in *tables_df*.
+
+    Unwinds the rows and, for each table that already exists in the graph,
+    resolves its ``id`` property by matching the
+    ``(Database)-[:CONTAINS]->(Schema)-[:CONTAINS]->(Table)`` pattern.
+
+    Returns a copy of *tables_df* with an ``id`` column (``None`` for tables
+    not found in the graph).
+    """
+    query = f"""
+        UNWIND $rows AS row
+        MATCH (d:{Labels.DB}{{name: $database_name}})-[:{Edges.CONTAINS}]->
+              (s:{Labels.SCHEMA}{{name: row.table_schema}})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE}{{name: row.table_name}})
+        RETURN collect({{
+            table_name: row.table_name,
+            table_schema: row.table_schema,
+            id: t.id
+        }}) AS tables
+    """
+    rows = tables_df[["table_name", "table_schema"]].to_dict(orient="records")
+    res = get_neo4j_conn().query_read(
+        query=query,
+        parameters={"rows": rows, "database_name": database_name},
+    )
+    if not res or not res[0]["tables"]:
+        return tables_df
+
+    ids_df = pd.DataFrame(res[0]["tables"])
+    return tables_df.merge(ids_df, on=["table_name", "table_schema"], how="left")
+
+
+def get_column_ids(columns_df: pd.DataFrame, database_name: str) -> pd.DataFrame:
+    """Look up graph node IDs for the columns listed in *columns_df*.
+
+    Unwinds the rows and, for each column that already exists in the graph,
+    resolves its ``id`` property by matching the
+    ``(Database)-[:CONTAINS]->(Schema)-[:CONTAINS]->(Table)-[:CONTAINS]->(Column)``
+    pattern.
+
+    Returns a copy of *columns_df* with an ``id`` column (``None`` for columns
+    not found in the graph).
+    """
+    query = f"""
+        UNWIND $rows AS row
+        MATCH (d:{Labels.DB}{{name: $database_name}})-[:{Edges.CONTAINS}]->
+              (s:{Labels.SCHEMA}{{name: row.table_schema}})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE}{{name: row.table_name}})-[:{Edges.CONTAINS}]->
+              (c:{Labels.COLUMN}{{name: row.column_name}})
+        RETURN collect({{
+            table_name: row.table_name,
+            table_schema: row.table_schema,
+            column_name: row.column_name,
+            id: c.id
+        }}) AS columns
+    """
+    rows = columns_df[["table_name", "table_schema", "column_name"]].to_dict(orient="records")
+    res = get_neo4j_conn().query_read(
+        query=query,
+        parameters={"rows": rows, "database_name": database_name},
+    )
+    if not res or not res[0]["columns"]:
+        return columns_df
+
+    ids_df = pd.DataFrame(res[0]["columns"])
+    return columns_df.merge(ids_df, on=["table_name", "table_schema", "column_name"], how="left")
 
 
 def add_schemas_edge(edge, created):

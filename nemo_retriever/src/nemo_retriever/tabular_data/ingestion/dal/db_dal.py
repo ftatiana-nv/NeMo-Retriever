@@ -98,7 +98,7 @@ def accumulate_added_column_props(added_column, edges_to_add, new_schema):
             "to_label": added_column.props_files["label"],
             "to_identProps": added_column.match_props_files,
             "u_props": added_column.props_files,
-            "optional_edge_props": {"schema": added_column.schema},
+            "optional_edge_props": {},
         }
     )
 
@@ -135,7 +135,7 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
         logger.info(f"Tables to add in schema {schema_name}: {len(tables_names_to_add)}")
 
         for table_name in tables_names_to_add:
-            edge_params = {"schema": schema_name}
+            edge_params = {}
             add_schemas_edge(
                 [
                     existing_schema_node,
