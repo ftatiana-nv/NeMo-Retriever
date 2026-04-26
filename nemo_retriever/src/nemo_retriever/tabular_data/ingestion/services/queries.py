@@ -210,6 +210,12 @@ def _try_merge_in_memory(
             props = existing_q.sql_node.get_properties()
             props["total_counter"] = props.get("total_counter", 0) + sql_count
             existing_q.sql_node.add_property("total_counter", props["total_counter"])
+            # Carry over the incoming query's per-month counters so a
+            # different month from the deduplicated query is not lost.
+            for key, val in query_obj.sql_node.get_properties().items():
+                if key.startswith("count_"):
+                    merged = props.get(key, 0) + val
+                    existing_q.sql_node.add_property(key, merged)
             logger.info(
                 "Merged structurally equivalent query into in-memory query %s.",
                 qid,
