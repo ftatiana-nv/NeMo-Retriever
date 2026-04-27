@@ -32,8 +32,33 @@ Ground every entity in the user question to a database artifact.
 ## Workflow
 
 ### Step 1 — decompose_question
-Call once with the raw question.
-Returns a list of entities sorted by priority.
+Call once with the raw question. Returns a list of typed entities sorted by priority.
+
+The goal is **atomic decomposition**: every distinct database concept in the
+question must become its own entity. Each entity should map to *one* table,
+column, measurable, time period, or literal value — never a combination.
+
+**Heuristic — split at clause boundaries:**
+- Each output column the user asks for → its own entity.
+- Each subject/object noun (table-like concept) → its own entity.
+- Each filter (predicate, threshold, or comparison) → its own entity, with the
+  threshold/value kept together with its qualifier.
+- Each time period or proper-noun literal → its own entity.
+
+**Hard constraint — every entity term must contain a concrete noun.** Any term
+made up only of comparators, numbers, qualifiers, quantifiers, or prepositions
+— with no noun — is invalid and must be merged into the entity for the noun it
+modifies. Before emitting an entity, check: does this term name a thing that
+can be looked up in the database?
+
+Normally an entity should be up to 3 words.
+
+Each entity term must be **plain natural-language text** — spell out
+comparators in words rather than using mathematical symbols.
+
+**Do NOT** collapse multiple concepts into a single entity just because they
+appear in the same sentence. A single entity describing the entire question is
+almost always wrong.
 
 ### Step 2 — retrieve_for_entity — CALL ONCE PER ENTITY
 

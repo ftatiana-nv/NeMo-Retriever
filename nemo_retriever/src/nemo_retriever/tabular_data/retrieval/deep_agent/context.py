@@ -19,7 +19,6 @@ class EntityCoverage(TypedDict):
     resolved_as: Literal["column", "custom_analysis", "expression", "unresolved", "value", "time_filter"]
     candidates: list[dict]
     sql_expression: str | None  # only populated when resolved_as == "expression"
-    filter_field_hint: str | None  # for value entities: the field concept this value filters on
     matched_table: str | None  # populated when covered_by_existing_table is True
     matched_column: str | None  # populated when covered_by_existing_table is True
 

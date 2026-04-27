@@ -115,7 +115,6 @@ class RetrievalStore:
                     "resolved_as": self._resolved_as(r),
                     "candidates": r.get("candidates", []),
                     "sql_expression": r.get("sql_expression"),
-                    "filter_field_hint": r.get("filter_field_hint"),
                     "matched_table": None,
                     "matched_column": None,
                 }
@@ -147,6 +146,7 @@ class _EntityItem(BaseModel):
         ...,
         description=(
             "A semantic concept or phrase from the question — may be multiple words. "
+            "Plain natural-language text only — spell out comparators in words. "
             "Never split a multi-word concept into individual words."
         ),
     )
@@ -158,14 +158,6 @@ class _EntityItem(BaseModel):
             "time_filter — a time period or date (last month, Q1 2024, yesterday …); "
             "value — a specific named literal that will become a WHERE filter "
             "(e.g. 'Seattle' in 'students from Seattle', 'Enterprise' in 'Enterprise customers'). "
-        ),
-    )
-    filter_field_hint: str | None = Field(
-        default=None,
-        description=(
-            "For value entities only: the field/concept this value filters on. "
-            "Example: entity='Seattle', filter_field_hint='city'. "
-            "Leave null for non-value entities."
         ),
     )
     priority: int = Field(
@@ -227,24 +219,41 @@ def _make_decompose_question_tool(llm: Any, store: RetrievalStore):
 User Question:
 {question}
 
-CRITICAL RULE — extract SEMANTIC CONCEPTS, not individual words:
-- Merge adjacent words that together describe a single DB concept into one entity.
-- Numeric thresholds and qualifiers belong WITH the concept they modify — do not split them out.
-- A multi-word phrase that maps to a single table, column, or measurable concept is ONE entity.
+GOAL — atomic decomposition.
+Every distinct DB concept in the question must become its own entity. Each
+entity must map to ONE artifact: one table, column, measurable, time period,
+or literal value. Never combine multiple concepts into a single entity.
+
+How to split:
+- Each output column the user asks for → its own entity.
+- Each subject / object noun → its own entity.
+- Each predicate / filter / threshold → its own entity, paired with the field
+  it modifies in the SAME entity.
+- Each time period or proper-noun literal → its own entity.
+
+HARD CONSTRAINT — every entity term MUST contain a concrete noun (the
+subject/field/concept being referred to). Any term made up only of comparators,
+numbers, qualifiers, quantifiers, or prepositions — with no noun — is INVALID
+and MUST be merged into the entity for the noun it modifies, by including that
+noun in the term itself. Before emitting an entity, check: does this term name
+a thing that can be looked up in a database? If not, fix it.
+
+Normally an entity should be up to 3 words.
+
+Each entity term must be PLAIN NATURAL-LANGUAGE TEXT — spell out comparators
+in words rather than using mathematical symbols.
 
 Entity types:
 - metric: a measurable value or aggregate the user wants to compute
 - dimension: a schema object — table or column concept
 - time_filter: a time period or date expression
-- value: a SPECIFIC NAMED LITERAL for a WHERE clause — only proper nouns or named instances
+- value: a SPECIFIC NAMED LITERAL or threshold for a WHERE clause
 
 Priority (lower = retrieved first):
 1 = primary subject being queried
 2 = related object / join target
 3 = filter attribute concept
 4 = filter value or time literal
-
-For value entities only: set filter_field_hint to the field concept being filtered.
 
 Order entities by priority ascending in your output."""
 
@@ -261,8 +270,7 @@ Order entities by priority ascending in your output."""
 
         lines = [f"Extracted {len(entities)} entities (call retrieve_for_entity for each):"]
         for i, e in enumerate(entities, 1):
-            hint = f" → filter on '{e['filter_field_hint']}'" if e.get("filter_field_hint") else ""
-            lines.append(f"  {i}. [{e['entity_type']} p={e['priority']}] {e['term']}{hint}")
+            lines.append(f"  {i}. [{e['entity_type']} p={e['priority']}] {e['term']}")
         return "\n".join(lines)
 
     return decompose_question
@@ -326,7 +334,6 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                     "relevant_tables": relevant_tables,
                     "relevant_fks": relevant_fks,
                     "sql_expression": None,
-                    "filter_field_hint": None,
                 }
             )
 
@@ -347,7 +354,6 @@ def _make_retrieve_for_entity_tool(store: RetrievalStore):
                     "relevant_tables": [],
                     "relevant_fks": [],
                     "sql_expression": None,
-                    "filter_field_hint": None,
                 }
             )
             return f"'{entity_term}' — retrieval failed: {exc}"
@@ -445,7 +451,6 @@ def _patch_expression(store: RetrievalStore, entity_term: str, expression: str, 
             "relevant_tables": [],
             "relevant_fks": [],
             "sql_expression": expression if success else None,
-            "filter_field_hint": None,
         }
     )
 
