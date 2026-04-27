@@ -24,13 +24,13 @@ from langchain_core.messages import SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.candidates_preparation import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.candidates_preparation import (
     CandidatePreparationAgent,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import EntityCoverage, RetrievalContext
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import EntityCoverage, RetrievalContext
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.deep_agent.utils import (
     Labels,
     _apply_foreign_key_hints,
     clean_results,
@@ -67,7 +67,7 @@ class RetrievalStore:
     """
 
     def __init__(self, retriever=None) -> None:
-        self.retriever = retriever  # shared OmniLiteRetriever — init once in main.py
+        self.retriever = retriever  # shared DeepAgentRetriever — init once in main.py
         self.question: str = ""
         self.entities: list[dict] = []
         self.entity_results: list[dict] = []
@@ -559,7 +559,7 @@ def build_retrieval_tools(payload: AgentPayload, llm: Any, retriever=None) -> tu
         payload: The ``AgentPayload`` from the caller.
         llm: The LLM client used by ``decompose_question`` and
             ``synthesize_expression``.
-        retriever: Optional pre-built ``OmniLiteRetriever`` singleton from
+        retriever: Optional pre-built ``DeepAgentRetriever`` singleton from
             ``main.py``.  When provided, the same instance is reused across all
             ``retrieve_for_entity`` calls in this session instead of creating a
             new one each time.

@@ -7,7 +7,7 @@ Kept separate from ``graph.py`` to avoid circular imports (agents import state;
 Also re-exports ``RetrievalContext`` and ``EntityCoverage`` from ``context.py``
 so downstream code can import everything from one place::
 
-    from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+    from nemo_retriever.tabular_data.retrieval.deep_agent.state import (
         AgentPayload, AgentState, RetrievalContext, EntityCoverage,
     )
 """
@@ -19,7 +19,7 @@ from typing import Any, NotRequired, TypedDict
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import (  # noqa: F401
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import (  # noqa: F401
     EntityCoverage,
     RetrievalContext,
 )

@@ -20,14 +20,12 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
-import networkx as nx
-
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import (
     AgentState,
     get_question_for_processing,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.base import BaseAgent
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.base import BaseAgent
+from nemo_retriever.tabular_data.retrieval.deep_agent.utils import (
     Labels,
     _apply_foreign_key_hints,
     dedupe_merge_relevant_tables,
@@ -91,7 +89,7 @@ class CandidatePreparationAgent(BaseAgent):
         question = get_question_for_processing(state)
         candidates = list(path_state.get("retrieved_candidates") or [])
 
-        relevant_tables , relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
+        relevant_tables, relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
 
         additional_tables, additional_fks = get_relevant_tables(
             question,
@@ -105,10 +103,7 @@ class CandidatePreparationAgent(BaseAgent):
         relevant_tables = dedupe_merge_relevant_tables(relevant_tables)
         _apply_foreign_key_hints(relevant_tables, relevant_fks)
 
-        self.logger.info(
-            f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys"
-        )
-
+        self.logger.info(f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys")
 
         relevant_queries = get_relevant_queries(
             candidates,
@@ -119,7 +114,7 @@ class CandidatePreparationAgent(BaseAgent):
         # similar_questions = []
         # embeddings_client = _optional_embeddings_client()  #TODO store and retrieve from somewhere
         # similar_questions = find_similar_questions(
-        #     embeddings_client.embed_query(question), 
+        #     embeddings_client.embed_query(question),
         # )
         # self.logger.info(
         #     f"Found {len(similar_questions)} similar questions from conversations"
@@ -140,9 +135,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         # Build string representation of complex candidates for prompts
         complex_candidates_str = self._build_complex_candidates_str(candidates)
-        self.logger.info(
-            f"Built string representation with {len(complex_candidates_str)} entries"
-        )
+        self.logger.info(f"Built string representation with {len(complex_candidates_str)} entries")
 
         # Store all prepared data in path_state
         return {
@@ -156,7 +149,6 @@ class CandidatePreparationAgent(BaseAgent):
                 "complex_candidates_str": complex_candidates_str,
             }
         }
-
 
     def _build_complex_candidates_str(self, candidates: list) -> list[str]:
         """

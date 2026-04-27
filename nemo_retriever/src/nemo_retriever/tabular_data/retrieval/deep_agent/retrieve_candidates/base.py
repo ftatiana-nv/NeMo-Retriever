@@ -16,7 +16,7 @@ Design Principles:
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentState
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +177,7 @@ def agent_wrapper(agent: BaseAgent):
         """
         # Validate input
         if not agent.validate_input(state):
-            agent.logger.warning(
-                f"Input validation failed for {agent.agent_name}, skipping execution"
-            )
+            agent.logger.warning(f"Input validation failed for {agent.agent_name}, skipping execution")
             return {}
 
         # Log execution start
@@ -191,9 +189,7 @@ def agent_wrapper(agent: BaseAgent):
 
             # Ensure result is a dict
             if not isinstance(result, dict):
-                agent.logger.error(
-                    f"Agent {agent.agent_name} returned non-dict result: {result}"
-                )
+                agent.logger.error(f"Agent {agent.agent_name} returned non-dict result: {result}")
                 return {}
 
             # Log execution end

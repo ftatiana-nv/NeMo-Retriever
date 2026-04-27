@@ -2,12 +2,12 @@
 
 Phases
 ------
-1. **Retrieval Agent** (``retrieval_agent_runtime.run_retrieval_agent``)
+1. **Retrieval Agent** (``retrieve_candidates.agent_runtime.run_retrieval_agent``)
    Decomposes the question into typed entities, retrieves per-entity
    candidates, and synthesizes SQL expressions for uncovered entities.
    Returns a ``RetrievalContext``.
 
-2. **SQL Agent** (``omni_lite_runtime.create_omni_lite_agent``)
+2. **SQL Agent** (``sql_generation.agent_runtime.create_sql_agent``)
    Receives the ``RetrievalContext`` in its system prompt (no retrieval
    tool-call history) and generates + validates SQL.  Returns a validated
    SQL string via ``ExecutionStore``.
@@ -19,20 +19,20 @@ Phases
 import logging
 import os
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
-from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
-    create_omni_lite_agent,
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import RetrievalContext
+from nemo_retriever.tabular_data.retrieval.deep_agent.sql_generation.agent_runtime import (
+    create_sql_agent,
     extract_structured_answer,
-    format_omni_lite_user_prompt,
+    format_sql_user_prompt,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_agent_runtime import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.agent_runtime import (
     run_retrieval_agent,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.tools import ExecutionStore
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.deep_agent.sql_generation.tools import ExecutionStore
+from nemo_retriever.tabular_data.retrieval.deep_agent.utils import (
     _make_llm,
-    _omni_semantic_retriever_init_kwargs,
+    _semantic_retriever_init_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,16 +44,16 @@ except ValueError as e:
     llm_client = None
 
 try:
-    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
+    from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.retriever import DeepAgentRetriever
 
     _uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
     _table = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
     # top_k=30 covers the highest k used anywhere; per-call limits are applied
     # downstream by _hits_to_semantic_rows so no results are wasted.
-    retriever_client = OmniLiteRetriever(**_omni_semantic_retriever_init_kwargs(_uri, _table, top_k=30))
-    logger.info("OmniLiteRetriever initialised once at startup (uri=%s table=%s)", _uri, _table)
+    retriever_client = DeepAgentRetriever(**_semantic_retriever_init_kwargs(_uri, _table, top_k=30))
+    logger.info("DeepAgentRetriever initialised once at startup (uri=%s table=%s)", _uri, _table)
 except Exception as e:
-    logger.error("Failed to initialize OmniLiteRetriever: %s", e)
+    logger.error("Failed to initialize DeepAgentRetriever: %s", e)
     retriever_client = None
 
 
@@ -118,9 +118,9 @@ def _run_sql_agent(
         ``(sql, store)`` — ``sql`` is the validated SQL string (may be empty
         on failure), ``store`` carries ``store.sql`` for Phase 3.
     """
-    agent, store = create_omni_lite_agent(payload, retrieval_ctx, llm=llm)
+    agent, store = create_sql_agent(payload, retrieval_ctx, llm=llm)
 
-    prompt = format_omni_lite_user_prompt(
+    prompt = format_sql_user_prompt(
         question=payload["question"],
         history=payload.get("history"),
         dialects=payload.get("dialects"),

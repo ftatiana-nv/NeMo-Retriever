@@ -330,12 +330,12 @@ def _hits_to_semantic_rows(hits: list[dict], _allowed_labels: set[str], k: int) 
     return rows[: int(k)]
 
 
-def _omni_semantic_retriever_init_kwargs(
+def _semantic_retriever_init_kwargs(
     uri: str,
     table_name: str,
     top_k: int,
 ) -> dict:
-    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``OmniLiteRetriever``.
+    """Build kwargs for :class:`~nemo_retriever.retriever.Retriever` / ``DeepAgentRetriever``.
 
     When ``OMNI_SEMANTIC_EMBEDDING_HTTP_ENDPOINT`` (or ``EMBEDDING_HTTP_ENDPOINT``) is set,
     query embeddings go to that HTTP NIM / OpenAI-compatible API (same pattern as
@@ -366,10 +366,10 @@ def search_lancedb_semantic_index(
 ) -> list[dict]:
     """
     Vector search over LanceDB via
-    :class:`~nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override.OmniLiteRetriever`
+    :class:`~nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.retriever.DeepAgentRetriever`
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
-    ``OmniLiteRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
+    ``DeepAgentRetriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
     (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
     ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
@@ -380,7 +380,7 @@ def search_lancedb_semantic_index(
             initialised with ``top_k=30`` (the highest value used anywhere); results
             are truncated to ``k`` by ``_hits_to_semantic_rows``.
         label_filter: Optional list of LanceDB label strings to restrict results.
-        retriever: Optional pre-built ``OmniLiteRetriever`` instance.  When
+        retriever: Optional pre-built ``DeepAgentRetriever`` instance.  When
             ``None`` a new instance is created for backward compatibility, but the
             preferred path is to pass the module-level singleton from ``main.py``
             via ``RetrievalStore.retriever``.
@@ -393,7 +393,7 @@ def search_lancedb_semantic_index(
     ``https://integrate.api.nvidia.com/v1``, and ``NVIDIA_API_KEY`` for the hosted API.
     Optional: ``OMNI_SEMANTIC_EMBEDDER_MODEL`` (default matches ``Retriever.embedder``).
     """
-    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_override import OmniLiteRetriever
+    from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.retriever import DeepAgentRetriever
 
     uri = os.environ.get("OMNI_SEMANTIC_LANCEDB_URI", "lancedb")
     table_name = os.environ.get("OMNI_SEMANTIC_LANCEDB_TABLE", "nv-ingest-tabular")
@@ -401,8 +401,8 @@ def search_lancedb_semantic_index(
     limit = max(1, int(k))
 
     if retriever is None:
-        retriever = OmniLiteRetriever(
-            **_omni_semantic_retriever_init_kwargs(uri, table_name, limit),
+        retriever = DeepAgentRetriever(
+            **_semantic_retriever_init_kwargs(uri, table_name, limit),
             # reranker=True,  # enable second-stage reranking
         )
 

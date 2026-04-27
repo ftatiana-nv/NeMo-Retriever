@@ -4,7 +4,7 @@ import logging
 from nemo_retriever.tabular_data.neo4j.neo4j_connection import get_neo4j_conn
 
 # Labels imported for the commented-out validation body below
-# from nemo_retriever.tabular_data.retrieval.omni_lite.utils import Labels
+# from nemo_retriever.tabular_data.retrieval.deep_agent.utils import Labels
 
 logger = logging.getLogger(__name__)
 neo4j_conn = get_neo4j_conn()

@@ -11,7 +11,7 @@ Tools
 - ``validate_sql`` — Step 3: validate SQL (reads ``store.draft_sql``)
 - ``fix_sql``      — Step 4 (conditional): targeted fix on validation error
 
-Use ``build_omni_lite_tools(payload, llm)`` → ``(tools, store)``.
+Use ``build_sql_tools(payload, llm)`` → ``(tools, store)``.
 """
 
 from __future__ import annotations
@@ -24,12 +24,12 @@ from langchain_core.messages import SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.agents.query_validation import (
+from nemo_retriever.tabular_data.retrieval.deep_agent.sql_generation.query_validation import (
     query_validation,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.ai_services import invoke_with_structured_output
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.deep_agent.ai_services import invoke_with_structured_output
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import RetrievalContext
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentPayload
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ Rules:
 # ---------------------------------------------------------------------------
 
 
-def build_omni_lite_tools(
+def build_sql_tools(
     payload: AgentPayload, llm: Any, retrieval_ctx: RetrievalContext | None = None
 ) -> tuple[list, SqlGenerationStore]:
     """Build and return Phase 2 SQL Agent tools and a shared ``SqlGenerationStore``.
@@ -514,4 +514,4 @@ def build_omni_lite_tools(
 # Keep ExecutionStore as a thin alias so any existing imports don't break
 ExecutionStore = SqlGenerationStore
 
-__all__ = ["build_omni_lite_tools", "SqlGenerationStore", "ExecutionStore", "_strip_sql_fences"]
+__all__ = ["build_sql_tools", "SqlGenerationStore", "ExecutionStore", "_strip_sql_fences"]

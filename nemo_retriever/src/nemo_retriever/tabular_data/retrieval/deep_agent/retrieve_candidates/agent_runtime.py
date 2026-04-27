@@ -13,7 +13,7 @@ Usage
 -----
 ::
 
-    from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_agent_runtime import (
+    from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.agent_runtime import (
         run_retrieval_agent,
     )
 
@@ -30,15 +30,18 @@ from typing import Any
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
-from nemo_retriever.tabular_data.retrieval.omni_lite.retrieval_tools import RetrievalStore, build_retrieval_tools
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import RetrievalContext
+from nemo_retriever.tabular_data.retrieval.deep_agent.retrieve_candidates.tools import (
+    RetrievalStore,
+    build_retrieval_tools,
+)
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.deep_agent.utils import _make_llm
 
 logger = logging.getLogger(__name__)
 
 _BASE_DIR = Path(__file__).resolve().parent
-_AGENTS_MD = str(_BASE_DIR / "AGENTS_retrieval.md")
+_AGENTS_MD = str(_BASE_DIR / "AGENTS.md")
 
 # Keys required in the agent's final JSON message (fallback path only)
 _REQUIRED_KEYS = frozenset({"entity_coverage", "relevant_tables", "relevant_fks", "coverage_complete"})
@@ -60,7 +63,7 @@ _EMPTY_CONTEXT: RetrievalContext = {
 
 
 def _build_retrieval_system_prompt() -> str:
-    """Read AGENTS_retrieval.md and return it as the system prompt.
+    """Read AGENTS.md and return it as the system prompt.
 
     The deep agent framework requires a non-null system_prompt to engage the
     tool-calling loop.  Without it the LLM generates a single plain-text reply
@@ -71,7 +74,7 @@ def _build_retrieval_system_prompt() -> str:
         try:
             return agents_md_path.read_text(encoding="utf-8")
         except Exception as exc:
-            logger.warning("Could not read AGENTS_retrieval.md: %s", exc)
+            logger.warning("Could not read AGENTS.md: %s", exc)
     return (
         "You are the Retrieval Deep Agent (Phase 1 of a 3-phase Text-to-SQL pipeline).\n"
         "You MUST call tools in order: decompose_question → retrieve_for_entity (once per entity) "
@@ -190,7 +193,7 @@ def run_retrieval_agent(
     Args:
         payload: Caller-supplied payload.  Required: ``question``.
         llm: Optional pre-built LLM client.
-        retriever: Optional pre-built ``OmniLiteRetriever`` singleton.  When
+        retriever: Optional pre-built ``DeepAgentRetriever`` singleton.  When
             provided, the same instance is reused for all LanceDB searches in
             this session — avoids re-initializing the embedder model each call.
         max_retries: Number of agent invocation attempts before giving up.

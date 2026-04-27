@@ -9,13 +9,13 @@ Usage
 -----
 ::
 
-    from nemo_retriever.tabular_data.retrieval.omni_lite.omni_lite_runtime import (
-        create_omni_lite_agent,
+    from nemo_retriever.tabular_data.retrieval.deep_agent.sql_generation.agent_runtime import (
+        create_sql_agent,
         extract_structured_answer,
-        format_omni_lite_user_prompt,
+        format_sql_user_prompt,
     )
 
-    agent, store = create_omni_lite_agent(payload, retrieval_ctx, llm=llm_client)
+    agent, store = create_sql_agent(payload, retrieval_ctx, llm=llm_client)
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
     answer = extract_structured_answer(result)
 """
@@ -32,10 +32,10 @@ from typing import Any
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 
-from nemo_retriever.tabular_data.retrieval.omni_lite.context import RetrievalContext
-from nemo_retriever.tabular_data.retrieval.omni_lite.state import AgentPayload
-from nemo_retriever.tabular_data.retrieval.omni_lite.tools import SqlGenerationStore, build_omni_lite_tools
-from nemo_retriever.tabular_data.retrieval.omni_lite.utils import _make_llm
+from nemo_retriever.tabular_data.retrieval.deep_agent.context import RetrievalContext
+from nemo_retriever.tabular_data.retrieval.deep_agent.state import AgentPayload
+from nemo_retriever.tabular_data.retrieval.deep_agent.sql_generation.tools import SqlGenerationStore, build_sql_tools
+from nemo_retriever.tabular_data.retrieval.deep_agent.utils import _make_llm
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ _REQUIRED_ANSWER_KEYS = frozenset({"sql_code", "answer", "result"})
 # ---------------------------------------------------------------------------
 
 
-def create_omni_lite_agent(
+def create_sql_agent(
     payload: AgentPayload,
     retrieval_ctx: RetrievalContext,
     llm: Any | None = None,
@@ -78,7 +78,7 @@ def create_omni_lite_agent(
     if llm is None:
         llm = _make_llm()
 
-    tools, store = build_omni_lite_tools(payload, llm, retrieval_ctx=retrieval_ctx)
+    tools, store = build_sql_tools(payload, llm, retrieval_ctx=retrieval_ctx)
 
     skill_dirs = _load_skill_dirs()
     agents_md = str(_BASE_DIR / "AGENTS.md")
@@ -164,7 +164,7 @@ def _build_system_prompt(payload: AgentPayload, retrieval_ctx: RetrievalContext)
 # ---------------------------------------------------------------------------
 
 
-def format_omni_lite_user_prompt(
+def format_sql_user_prompt(
     question: str,
     history: list[dict[str, str]] | None = None,
     dialects: list[str] | None = None,
@@ -335,7 +335,7 @@ def _extract_sql_from_prose(text: str) -> dict | None:
 
 
 __all__ = [
-    "create_omni_lite_agent",
+    "create_sql_agent",
     "extract_structured_answer",
-    "format_omni_lite_user_prompt",
+    "format_sql_user_prompt",
 ]

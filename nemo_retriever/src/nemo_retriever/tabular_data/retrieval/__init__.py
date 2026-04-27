@@ -1,18 +1,18 @@
 """Public entry point: `generate_sql` (SQL string) and `get_sql_tool_response_top_k` (full dict).
 
-``generate_sql`` uses the OmniLite Deep Agent pipeline.
+``generate_sql`` uses the Deep Agent pipeline.
 ``get_sql_tool_response_top_k`` is the legacy LanceDB + single-LLM-call path, kept for
 backwards compatibility.
 """
 
+from nemo_retriever.tabular_data.retrieval.deep_agent import get_agent_response
 from nemo_retriever.tabular_data.retrieval.generate_sql import (
     get_sql_tool_response_top_k,
 )
-from nemo_retriever.tabular_data.retrieval.omni_lite.main import get_agent_response
 
 
 def generate_sql(query: str, top_k: int = 15, db_connector=None) -> str:  # noqa: ARG001
-    """Generate SQL for a natural language query using the OmniLite Deep Agent.
+    """Generate SQL for a natural language query using the Deep Agent.
 
     Args:
         query: Natural language question.
