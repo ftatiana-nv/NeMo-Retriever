@@ -34,8 +34,75 @@ _KEEP_KEYS = frozenset(
         "stored_image_uri",
         "content_type",
         "bbox_xyxy_norm",
+        "label",
+        "_distance",
     }
 )
+
+
+def _sql_in_literals(values: Sequence[str]) -> str:
+    """Escape single-quoted strings for LanceDB ``IN (...)`` predicates."""
+    return ", ".join("'" + str(v).replace("'", "''") + "'" for v in values)
+
+
+def _sql_string_literal(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _build_label_where(
+    field_names: list[str],
+    label_in: Optional[Sequence[str]],
+) -> Optional[str]:
+    """Return a DataFusion/Lance ``WHERE`` fragment for ``label_in``, or ``None``.
+
+    Rows may store the semantic label in a top-level ``label`` column and/or inside
+    the serialized ``metadata`` string. The filter is ``(label IN (...)) OR (<metadata LIKE …>)``
+    when both exist, so vector search keeps rows whether the denormalized column or the blob
+    carries the label (and Neo4j-style ``Column`` vs ``column`` is covered in ``LIKE`` patterns).
+    """
+    if not label_in:
+        return None
+    labels = [str(x).strip() for x in label_in if x is not None and str(x).strip()]
+    if not labels:
+        return None
+
+    have_label_col = "label" in field_names
+    have_metadata = "metadata" in field_names
+    if not have_label_col and not have_metadata:
+        return None
+
+    or_parts: list[str] = []
+
+    if have_label_col:
+        or_parts.append(f"label IN ({_sql_in_literals(labels)})")
+
+    if have_metadata:
+
+        def value_variants(canonical: str) -> list[str]:
+            c = canonical.lower()
+            if c == "table":
+                return ["table", "Table", "TABLE"]
+            if c == "column":
+                return ["column", "Column", "COLUMN"]
+            return [canonical]
+
+        like_parts: list[str] = []
+        for lab in labels:
+            for v in value_variants(lab):
+                for inner in (f'"label": "{v}"', f'"label":"{v}"'):
+                    pat = "%" + inner + "%"
+                    like_parts.append(f"metadata LIKE {_sql_string_literal(pat)}")
+                inner_repr = f"'label': '{v}'"
+                pat_repr = "%" + inner_repr + "%"
+                like_parts.append(f"metadata LIKE {_sql_string_literal(pat_repr)}")
+        if like_parts:
+            or_parts.append("(" + " OR ".join(like_parts) + ")")
+
+    if not or_parts:
+        return None
+    if len(or_parts) == 1:
+        return or_parts[0]
+    return "(" + " OR ".join(or_parts) + ")"
 
 
 @dataclass
@@ -173,6 +240,7 @@ class Retriever:
         query_vectors: list[list[float]],
         query_texts: list[str],
         top_k: int,
+        label_in: Optional[Sequence[str]] = None,
     ) -> list[list[dict[str, Any]]]:
         import lancedb  # type: ignore
         import numpy as np
@@ -194,10 +262,14 @@ class Retriever:
                 effective_nprobes = 16
 
         # Check whether the table has a stored_image_uri column (added for VL reranking).
-        table_columns = {f.name for f in table.schema}
+        field_names = [f.name for f in table.schema]
+        table_columns = set(field_names)
         has_image_uri = "stored_image_uri" in table_columns
         has_content_type = "content_type" in table_columns
         has_bbox = "bbox_xyxy_norm" in table_columns
+        has_label = "label" in table_columns
+
+        label_where = _build_label_where(field_names, label_in)
 
         results: list[list[dict[str, Any]]] = []
         for i, vector in enumerate(query_vectors):
@@ -207,16 +279,16 @@ class Retriever:
             if self.hybrid:
                 from lancedb.rerankers import RRFReranker  # type: ignore
 
-                hits = (
+                chain = (
                     table.search(query_type="hybrid")
                     .vector(q)
                     .text(query_texts[i])
                     .nprobes(effective_nprobes)
                     .refine_factor(int(self.refine_factor))
-                    .limit(int(fanout_top_k))
-                    .rerank(RRFReranker())
-                    .to_list()
                 )
+                if label_where:
+                    chain = chain.where(label_where)
+                hits = chain.limit(int(fanout_top_k)).rerank(RRFReranker()).to_list()
             else:
                 select_cols = [
                     "text",
@@ -235,14 +307,16 @@ class Retriever:
                     select_cols.append("content_type")
                 if has_bbox:
                     select_cols.append("bbox_xyxy_norm")
-                hits = (
+                if has_label:
+                    select_cols.append("label")
+                chain = (
                     table.search(q, vector_column_name=self.vector_column_name)
                     .nprobes(effective_nprobes)
                     .refine_factor(int(self.refine_factor))
-                    .select(select_cols)
-                    .limit(int(fanout_top_k))
-                    .to_list()
                 )
+                if label_where:
+                    chain = chain.where(label_where)
+                hits = chain.select(select_cols).limit(int(fanout_top_k)).to_list()
             results.append([{k: v for k, v in h.items() if k in _KEEP_KEYS} for h in hits])
         return results
 
@@ -306,6 +380,7 @@ class Retriever:
         embedder: Optional[str] = None,
         lancedb_uri: Optional[str] = None,
         lancedb_table: Optional[str] = None,
+        label_in: Optional[Sequence[str]] = None,
     ) -> list[dict[str, Any]]:
         """Run retrieval for a single query string.
 
@@ -316,6 +391,10 @@ class Retriever:
             embedder: Per-call embedder override.
             lancedb_uri: Per-call LanceDB URI override.
             lancedb_table: Per-call LanceDB table override.
+            label_in: Optional list of semantic labels used to filter
+                LanceDB rows (``label IN (...) OR metadata LIKE ...``).
+                Ignored when the table has neither a ``label`` column nor
+                a ``metadata`` column.
         """
         return self.queries(
             [query],
@@ -323,6 +402,7 @@ class Retriever:
             embedder=embedder,
             lancedb_uri=lancedb_uri,
             lancedb_table=lancedb_table,
+            label_in=label_in,
         )[0]
 
     def queries(
@@ -333,6 +413,7 @@ class Retriever:
         embedder: Optional[str] = None,
         lancedb_uri: Optional[str] = None,
         lancedb_table: Optional[str] = None,
+        label_in: Optional[Sequence[str]] = None,
     ) -> list[list[dict[str, Any]]]:
         """Run retrieval for multiple query strings.
 
@@ -373,6 +454,7 @@ class Retriever:
             query_vectors=vectors,
             query_texts=query_texts,
             top_k=effective_top_k,
+            label_in=label_in,
         )
 
         if self.reranker:
@@ -392,6 +474,7 @@ class Retriever:
         embedder: Optional[str] = None,
         lancedb_uri: Optional[str] = None,
         lancedb_table: Optional[str] = None,
+        label_in: Optional[Sequence[str]] = None,
     ) -> "RetrievalResult":
         """Run retrieval for a single query and return a structured result.
 
@@ -427,6 +510,7 @@ class Retriever:
             embedder=embedder,
             lancedb_uri=lancedb_uri,
             lancedb_table=lancedb_table,
+            label_in=label_in,
         )
 
         chunks: list[str] = []
@@ -444,6 +528,7 @@ class Retriever:
         embedder: Optional[str] = None,
         lancedb_uri: Optional[str] = None,
         lancedb_table: Optional[str] = None,
+        label_in: Optional[Sequence[str]] = None,
     ) -> list["RetrievalResult"]:
         """Run retrieval for a batch of queries in a single embedder call.
 
@@ -477,6 +562,7 @@ class Retriever:
             embedder=embedder,
             lancedb_uri=lancedb_uri,
             lancedb_table=lancedb_table,
+            label_in=label_in,
         )
 
         results: list[RetrievalResult] = []
