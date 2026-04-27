@@ -88,10 +88,7 @@ class _QueryPlan(BaseModel):
     )
     join_conditions: list[str] = Field(
         default_factory=list,
-        description=(
-            "FK-based JOIN conditions in the form 'alias1.col = alias2.col'. "
-            "Use ONLY foreign keys from relevant_fks.  Never invent joins."
-        ),
+        description=("FK-based JOIN conditions in the form 'alias1.col = alias2.col'. "),
     )
     select_expressions: list[str] = Field(
         ...,
@@ -108,6 +105,16 @@ class _QueryPlan(BaseModel):
     group_by: list[str] = Field(
         default_factory=list,
         description="Columns/expressions for GROUP BY.",
+    )
+    having_conditions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "HAVING predicates that compare against aggregate expressions, "
+            'e.g. "COUNT(s.seat_id) > 2". '
+            "Use this — together with group_by — instead of a correlated "
+            "subquery in where_conditions whenever the user filters on a "
+            "count/sum/avg of a related table."
+        ),
     )
     order_by: list[str] = Field(
         default_factory=list,
@@ -243,6 +250,16 @@ Rules:
 - For entities with resolved_as="expression", embed their sql_expression directly.
 - If coverage_complete=false, note which entity is unresolved in the notes field.
 - Prefer certified SQL snippets as structural references when available.
+- JOIN vs WHERE: whenever more than one table is involved, link them with an
+  explicit JOIN ... ON ... clause and put the FK predicate in `join_conditions`.
+  NEVER place a join predicate (e.g. t1.id = t2.id) in `where_conditions`.
+  `where_conditions` is exclusively for row-level filters.
+- No correlated subqueries for joinable conditions. If a related table is used
+  to compute a COUNT / SUM / EXISTS / comparison against the main table's row,
+  add it to `tables_to_use`, declare the FK predicate in `join_conditions`,
+  group by the main-table key in `group_by`, and put the comparison in
+  `having_conditions` (NOT `where_conditions`). Do not emit
+  `(SELECT ... WHERE outer.col = inner.col) <op> ...` patterns.
 
 MANDATORY — Fully-Qualified Identifiers (apply in every expression you write in the plan):
 - Every table reference MUST be SCHEMA.TABLE AS alias  (e.g. school_scheduling.Students AS s).
@@ -267,6 +284,7 @@ Produce a structured query plan."""
             f"  select: {result.select_expressions}",
             f"  where: {result.where_conditions}",
             f"  group_by: {result.group_by}",
+            f"  having: {result.having_conditions}",
             f"  order_by: {result.order_by}",
             f"  use_cte: {result.use_cte}",
         ]
@@ -319,13 +337,16 @@ Foreign keys:
 MANDATORY RULES — every violation causes a validation failure:
 1. Every table MUST be written as SCHEMA.TABLE AS alias.
 2. Every column MUST be prefixed with its alias: alias.column.
-3. Every alias in SELECT/WHERE/GROUP BY/ORDER BY MUST be defined in FROM/JOIN.
+3. Every alias in SELECT/WHERE/GROUP BY/HAVING/ORDER BY MUST be defined in FROM/JOIN.
 4. Use ONLY tables from the plan's tables_to_use list.
-5. Use ONLY FK conditions listed in the plan for JOIN predicates.
-6. For entities with a sql_expression in the plan, embed that expression directly.
-7. String literals MUST use single quotes.  Never use double quotes for values.
-8. No SQL comments.  No markdown fences.
-9. SELECT-only — no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE.
+5. Use ONLY FK conditions listed in the plan for JOIN predicates. Place every
+   join predicate in an explicit JOIN ... ON ... clause — NEVER in WHERE.
+6. Translate the plan's having_conditions verbatim into a HAVING clause. Do
+   NOT rewrite aggregate filters as correlated subqueries in WHERE.
+7. For entities with a sql_expression in the plan, embed that expression directly.
+8. String literals MUST use single quotes.  Never use double quotes for values.
+9. No SQL comments.  No markdown fences.
+10. SELECT-only — no INSERT/UPDATE/DELETE/DROP/ALTER/CREATE.
 
 Write the complete SQL query."""
 

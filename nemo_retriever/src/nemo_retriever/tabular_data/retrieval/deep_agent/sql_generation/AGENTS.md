@@ -94,6 +94,15 @@ Your last message must be **only** a single JSON object — nothing before `{` o
 - **String literals MUST use single quotes**.  Double quotes are for identifiers only.
 - **SELECT-only**: `validate_sql` rejects INSERT/UPDATE/DELETE/DROP/ALTER/CREATE.
 - **Use ONLY tables and FKs in the plan** — never reference unlisted schema objects.
+- **JOIN vs WHERE**: when more than one table is involved, ALWAYS link them with
+  an explicit `JOIN ... ON ...` clause. Never put a join condition (e.g.
+  `t1.id = t2.id`) in `WHERE`. `WHERE` is reserved for row filtering.
+- **No correlated subqueries for joinable conditions.** Whenever a related
+  table is used to test a count/sum/exists/comparison against a row of the main
+  table, express it as `JOIN ... ON ...` plus `GROUP BY` and `HAVING` —
+  not as a `(SELECT ... WHERE outer.col = inner.col) <op> ...` subquery.
+  `EXISTS` / `IN (SELECT ...)` are also discouraged when an explicit JOIN
+  expresses the same intent.
 
 ---
 
