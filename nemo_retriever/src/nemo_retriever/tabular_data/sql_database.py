@@ -88,12 +88,18 @@ class SQLDatabase(ABC):
         """
 
     @abstractmethod
-    def get_queries(self) -> pd.DataFrame:
+    def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """Return recent / historical queries if the backend supports it.
 
         Expected columns: ``end_time``, ``query_text``.
         Connectors without query history should return an empty DataFrame
         with those two columns.
+
+        Parameters
+        ----------
+        hours:
+            Only return queries whose ``end_time`` falls within the last
+            ``hours`` hours. Defaults to 24.
         """
 
     @abstractmethod
