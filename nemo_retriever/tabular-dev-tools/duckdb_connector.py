@@ -26,7 +26,7 @@ from __future__ import annotations
 
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import duckdb
 import pandas as pd
@@ -118,10 +118,14 @@ class DuckDB(SQLDatabase):
         """
         )
 
-    def get_queries(self) -> pd.DataFrame:
+    def get_queries(self, hours: int = 24) -> pd.DataFrame:
         """DuckDB has no built-in query history — loads sample queries from a CSV
         whose name is derived from the database file (e.g. ``spider2.duckdb``
-        → ``sample_spider2_queries.csv``)."""
+        → ``sample_spider2_queries.csv``).
+
+        ``hours`` is accepted for interface compatibility; sample queries are
+        stamped with ``datetime.today()`` so they always fall within the window.
+        """
         db_stem = Path(self._connection_string).stem
         csv_path = Path(__file__).parent / "benchmarks" / db_stem / "sample_queries.csv"
         if not csv_path.exists():
