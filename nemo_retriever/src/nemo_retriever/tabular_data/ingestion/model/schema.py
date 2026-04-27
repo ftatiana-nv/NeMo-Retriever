@@ -94,7 +94,6 @@ class Schema:
                 "created": None if pd.isna(x["created"]) else x["created"],
                 "description": None if pd.isna(x["description"]) else x["description"],
                 "id": x.id,
-                "label": Labels.TABLE,
             },
             axis=1,
         )
@@ -112,7 +111,6 @@ class Schema:
                 "ordinal_position": x["ordinal_position"],
                 "description": None if pd.isna(x["description"]) else x["description"],
                 "id": x.id,
-                "label": Labels.COLUMN,
             },
             axis=1,
         )
@@ -126,7 +124,6 @@ class Schema:
             lambda x: {
                 "name": x["name"],
                 "id": x["id"],
-                "label": Labels.TABLE,
             },
             axis=1,
         )
@@ -141,7 +138,6 @@ class Schema:
                 "name": x["name"].strip('"'),
                 "data_type": (x["data_type"] or "").strip('"'),
                 "id": x["id"],
-                "label": Labels.COLUMN,
             },
             axis=1,
         )
@@ -261,7 +257,6 @@ class Schema:
     ):
         column_name_lower = column_name.lower()
         table_name_lower = table_name.lower()
-        label = Labels.COLUMN
         props = {"name": column_name}
         match_props = {"id": id}
         props = self.update_column_props_by_arguments(
@@ -273,7 +268,7 @@ class Schema:
         )
         column_node = Neo4jNode(
             column_name,
-            label=label,
+            label=Labels.COLUMN,
             props=props,
             existing_id=id,
             match_props=match_props,
@@ -369,7 +364,6 @@ class Schema:
         description=None,
     ):
         table_name_lower = table_name.lower()
-        label = Labels.TABLE
         props = {"name": table_name}
         match_props = {"id": id}
         props = self.update_table_props_by_arguments(
@@ -379,7 +373,7 @@ class Schema:
         )
         table_node = Neo4jNode(
             name=table_name,
-            label=label,
+            label=Labels.TABLE,
             props=props,
             existing_id=id,
             match_props=match_props,

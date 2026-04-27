@@ -92,10 +92,10 @@ def accumulate_added_column_props(added_column, edges_to_add, new_schema):
     new_table_node_match_props = new_schema.get_table_node_match_props(added_column.table_name)
     edges_to_add.append(
         {
-            "from_label": new_table_node_props["label"],
+            "from_label": Labels.TABLE,
             "from_identProps": new_table_node_match_props,
             "v_props": new_table_node_props,
-            "to_label": added_column.props_files["label"],
+            "to_label": Labels.COLUMN,
             "to_identProps": added_column.match_props_files,
             "u_props": added_column.props_files,
             "optional_edge_props": {},
