@@ -545,8 +545,8 @@ def get_node_properties_by_id(id, label: str | list[str]):
         return props[0]["props"]
 
 
-def get_item_by_id(account_id, item_id, label):
-    result = get_node_properties_by_id(account_id, item_id, label)
+def get_item_by_id(item_id, label):
+    result = get_node_properties_by_id(item_id, label)
     if result:
         return result
     else:
