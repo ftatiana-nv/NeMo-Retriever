@@ -532,11 +532,16 @@ def extract_entities_with_id_name_label(data):
     return result
 
 
+_ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
+
+
 def get_node_properties_by_id(id, label: str | list[str]):
-    if isinstance(label, list):
-        label_filter = "|".join(label)
-    else:
-        label_filter = label
+    labels_list = label if isinstance(label, list) else [label]
+    for lbl in labels_list:
+        if lbl not in _ALLOWED_NODE_LABELS:
+            logger.warning("Rejecting unknown label %r in get_node_properties_by_id", lbl)
+            return None
+    label_filter = "|".join(labels_list)
     query = f"""
         MATCH(n:{label_filter}{{id:$id}})
         RETURN apoc.map.setKey(properties(n),"label", labels(n)[0]) as props
