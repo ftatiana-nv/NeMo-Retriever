@@ -102,7 +102,6 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were never wrong. \n"
         )
 
-
         error_prompt += (
             "\nUse only the tables provided in the history.\n\n"
             "Use only the foreign keys provided in the history. NEVER create new foreign keys! \n"
