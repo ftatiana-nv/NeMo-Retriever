@@ -190,12 +190,16 @@ def expand_info(ids_and_labels):
         _cnt_str,
     ) = get_queries_usage_percentiles("sql_node")
 
+    allowed_labels = set(Labels.LIST_OF_ALL)
     for label, ids in groupby(
         sorted(items, key=lambda d: str(d.get("label") or "").strip()),
         key=lambda d: str(d.get("label") or "").strip(),
     ):
         label_id_pairs_for_current_label = list(ids)
         if not label:
+            continue
+        if label not in allowed_labels:
+            logger.warning("Skipping unknown label %r in expand_info", label)
             continue
         query = f"""UNWIND $label_id_pairs as label_id
                     MATCH (n:{label} {{id: label_id.id}})

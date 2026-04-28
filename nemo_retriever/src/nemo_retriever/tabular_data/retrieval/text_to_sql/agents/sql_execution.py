@@ -77,7 +77,8 @@ class SQLExecutionAgent(BaseAgent):
             self.logger.warning("Infra/auth error during execution: %s", response_from_db.error)
             response_from_db = None
 
+        db_result = response_from_db.result if response_from_db else None
         return {
             "decision": "valid_sql",
-            "path_state": {**path_state, "sql_response_from_db": response_from_db.result},
+            "path_state": {**path_state, "sql_response_from_db": db_result},
         }
