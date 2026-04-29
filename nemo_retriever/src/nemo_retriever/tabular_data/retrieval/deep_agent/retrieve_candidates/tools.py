@@ -461,12 +461,13 @@ def _patch_expression(store: RetrievalStore, entity_term: str, expression: str, 
 
 
 class _TableFilterResult(BaseModel):
-    relevant_table_names: list[str] = Field(
+    relevant_table_ids: list[str] = Field(
         ...,
         description=(
-            "Names of tables (exact match from the provided schema) that are genuinely needed "
+            "IDs of tables (exact match from the provided schema) that are genuinely needed "
             "to answer the user question. Omit any table whose subject domain does not match "
-            "the question's intent, even if one of its columns happened to match a search term."
+            "the question's intent, even if one of its columns happened to match a search term. "
+            "Use the table id (not the name) since the same table name can appear in different schemas."
         ),
     )
 
@@ -483,10 +484,16 @@ def _make_filter_relevant_tables_tool(store: RetrievalStore, llm: Any):
         intent and drops tables whose domain does not match — even if the vector search
         retrieved them because they share a column name with a search term.
 
+        Tables are identified by their unique ``id`` (not name) since the same table
+        name can appear in different schemas. The returned summary lists kept and
+        removed tables as ``id (name)`` pairs — always refer to tables by ``id``
+        downstream.
+
         No arguments needed; the tool reads the question and tables from the store.
 
         Returns:
-            A summary of which tables were kept and which were removed.
+            A summary of which tables were kept and which were removed, formatted as
+            ``id (name)`` so callers can reference tables unambiguously.
         """
         tables = store.accumulated_tables
         if not tables:
@@ -494,6 +501,9 @@ def _make_filter_relevant_tables_tool(store: RetrievalStore, llm: Any):
 
         schema_lines: list[str] = []
         for t in tables:
+            t_id = str(t.get("id") or "").strip()
+            if not t_id:
+                continue
             t_name = t.get("name") or ""
             t_desc = t.get("description") or ""
             col_names = []
@@ -502,7 +512,7 @@ def _make_filter_relevant_tables_tool(store: RetrievalStore, llm: Any):
                     col_names.append(col.get("name") or "")
                 elif isinstance(col, str):
                     col_names.append(col)
-            header = f"{t_name}" + (f" — {t_desc}" if t_desc else "")
+            header = f"id={t_id} | name={t_name}" + (f" — {t_desc}" if t_desc else "")
             schema_lines.append(f"  {header}: [{', '.join(c for c in col_names if c)}]")
 
         schema_str = "\n".join(schema_lines)
@@ -516,10 +526,13 @@ tables that are genuinely needed to answer this question. Remove any table whose
 subject domain does not match the question's intent, even if one of its columns
 coincidentally matched a search term.
 
+Each table is listed with a unique id and a name. The same table name can appear
+in different schemas, so always identify tables by their id.
+
 Retrieved tables:
 {schema_str}
 
-Return only the names of relevant tables. Use the exact table names from the list above."""
+Return only the ids of relevant tables. Use the exact id values from the list above."""
 
         messages = [SystemMessage(content=prompt)]
         result = invoke_with_structured_output(llm, messages, _TableFilterResult)
@@ -527,9 +540,9 @@ Return only the names of relevant tables. Use the exact table names from the lis
         if result is None:
             return "filter_relevant_tables: LLM call failed — tables unchanged."
 
-        keep = set(result.relevant_table_names)
-        before = [t.get("name") for t in tables]
-        store.accumulated_tables = [t for t in tables if t.get("name") in keep]
+        keep_ids = {str(i) for i in result.relevant_table_ids}
+        before = [(str(t.get("id") or ""), t.get("name")) for t in tables]
+        store.accumulated_tables = [t for t in tables if str(t.get("id") or "") in keep_ids]
 
         # Remove FKs whose both sides are no longer present
         remaining_names = {t.get("name") for t in store.accumulated_tables}
@@ -539,11 +552,14 @@ Return only the names of relevant tables. Use the exact table names from the lis
             if fk.get("from_table") in remaining_names or fk.get("to_table") in remaining_names
         ]
 
-        removed = [n for n in before if n not in keep]
-        kept = [n for n in before if n in keep]
-        parts = [f"Kept {len(kept)}: {kept}"]
+        def _fmt(tid: str, name: Any) -> str:
+            return f"{tid} ({name})" if name else tid
+
+        kept = [_fmt(tid, name) for tid, name in before if tid in keep_ids]
+        removed = [_fmt(tid, name) for tid, name in before if tid not in keep_ids]
+        parts = [f"Kept {len(kept)} (id (name)): {kept}"]
         if removed:
-            parts.append(f"Removed {len(removed)}: {removed}")
+            parts.append(f"Removed {len(removed)} (id (name)): {removed}")
         return " | ".join(parts)
 
     return filter_relevant_tables

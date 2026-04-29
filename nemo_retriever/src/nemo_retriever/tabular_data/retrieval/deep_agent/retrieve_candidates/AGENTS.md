@@ -85,6 +85,10 @@ The tool removes tables whose subject domain does not match the question's inten
 search retrieved them because they happened to share a column name with a search term.
 No arguments needed; the tool reads the question and tables from the store automatically.
 
+Tables are identified by their unique `id` (not name) — the same table name may exist in
+multiple schemas, so always reference tables by `id`. The tool's summary lists kept/removed
+tables as `id (name)` pairs.
+
 ### Step 5 — Done
 When all steps are complete, reply with: **"Retrieval complete."**
 The runtime reads results directly from the store — no JSON output required from you.
