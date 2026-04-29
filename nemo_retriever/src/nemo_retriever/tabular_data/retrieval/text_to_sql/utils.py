@@ -229,8 +229,8 @@ def search_lancedb_semantic_index(
     (same stack as ``generate_sql.get_sql_tool_response_top_k``).
 
     ``Retriever`` applies ``label_filter`` in LanceDB with ``(label IN (...)) OR
-    (metadata LIKE …)`` when those columns exist; labels are stored canonically
-    ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
+    (metadata LIKE …)`` when those columns exist (substring patterns include Neo4j-style
+    ``Column`` vs ``column``). ``_hits_to_semantic_rows`` maps hits to ``text`` + ``id``/``label``
     for downstream enrichment (no second label filter).
 
     The retriever's ``lancedb_uri`` / ``lancedb_table`` / ``embedder`` / embedding
