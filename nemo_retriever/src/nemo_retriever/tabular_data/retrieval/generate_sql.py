@@ -10,7 +10,7 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import get_llm_clie
 
 logger = logging.getLogger(__name__)
 
-# Load .env from current working directory so NVIDIA_API_KEY, LLM_INVOKE_URL are set (run from repo root)
+# Load .env from current working directory so NVIDIA_API_KEY, BASE_URL are set (run from repo root)
 try:
     from dotenv import load_dotenv
 
