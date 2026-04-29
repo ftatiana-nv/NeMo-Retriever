@@ -9,8 +9,6 @@ import time
 from itertools import groupby
 from typing import TYPE_CHECKING, Union
 import pandas as pd
-import numpy as np
-from datetime import date, timedelta
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
@@ -46,11 +44,6 @@ ATTR_CANDIDATE_MAX_ATTEMPTS = 3
 ENTITY_CANDIDATE_BUDGET = 4
 
 
-QUERIES_USAGE_PERCENTILE = "queries_usage_percentile"
-TABLES_USAGE_PERCENTILE = "tables_usage_percentile"
-COLUMNS_USAGE_PERCENTILE = "columns_usage_percentile"
-
-
 def get_llm_client() -> ChatNVIDIA:
     api_key = os.environ.get("NVIDIA_API_KEY")
     return ChatNVIDIA(
@@ -58,87 +51,6 @@ def get_llm_client() -> ChatNVIDIA:
         api_key=api_key,
         model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
     )
-
-
-def store_usage_percentiles(
-    percentiles_type_name: str,
-    usage_percentile_25: int,
-    usage_percentile_75: int,
-):
-    query = f"""
-            MATCH (d:{Labels.DB})
-            WITH d
-            CALL apoc.create.setProperties(d,
-                [$percentiles_type_name_25, $percentiles_type_name_75],
-                [$usage_percentile_25, $usage_percentile_75])
-            YIELD node
-            RETURN d
-            """
-    get_neo4j_conn().query_write(
-        query=query,
-        parameters={
-            "percentiles_type_name_25": f"{percentiles_type_name}_25",
-            "percentiles_type_name_75": f"{percentiles_type_name}_75",
-            "usage_percentile_25": usage_percentile_25,
-            "usage_percentile_75": usage_percentile_75,
-        },
-    )
-
-
-def get_stored_usage_percentiles(percentiles_type_name: str):
-    query = f"""
-                MATCH (n:{Labels.DB})
-                RETURN n.{f"{percentiles_type_name}_25"} as usage_percentile_25,
-                       n.{f"{percentiles_type_name}_75"} as usage_percentile_75
-                """
-    results = get_neo4j_conn().query_read(
-        query=query,
-        parameters={},
-    )
-    return results
-
-
-def get_count_str_by_month(alias: str):
-    current = date.today().replace(day=1)
-    count_3_month = []
-
-    for i in range(0, 3):
-        count_3_month.append(f"coalesce({alias}.cnt_{current.month}_{current.year}, 0)")
-        prev = current - timedelta(days=1)
-        current = prev.replace(day=1)
-
-    count_str = "+".join(count_3_month)
-    return count_str
-
-
-def init_queries_usage_percentiles():
-    count_string = get_count_str_by_month("n")
-    query_all = f"""match(n:{Labels.SQL}{{is_sub_select:FALSE}}) return collect({count_string}) as usages"""
-    usages_result = get_neo4j_conn().query_read(query=query_all, parameters={})
-    usages = usages_result[0]["usages"]
-    if len(usages) == 0:
-        return 0, 0
-    usage_percentile_25 = np.percentile(usages, 25)
-    usage_percentile_75 = np.percentile(usages, 75)
-    store_usage_percentiles(QUERIES_USAGE_PERCENTILE, usage_percentile_25, usage_percentile_75)
-    return usage_percentile_25, usage_percentile_75
-
-
-def get_usage_percentiles():
-    stored_percentiles = get_stored_usage_percentiles(QUERIES_USAGE_PERCENTILE)
-    if len(stored_percentiles) == 0 or (stored_percentiles[0]["usage_percentile_25"] is None):
-        usage_percentile_25, usage_percentile_75 = init_queries_usage_percentiles()
-    else:
-        usage_percentile_25 = stored_percentiles[0]["usage_percentile_25"]
-        usage_percentile_75 = stored_percentiles[0]["usage_percentile_75"]
-
-    return usage_percentile_25, usage_percentile_75
-
-
-def get_queries_usage_percentiles(node_str="node"):
-    count_str = get_count_str_by_month(node_str)
-    usage_percentile_25, usage_percentile_75 = get_usage_percentiles()
-    return usage_percentile_25, usage_percentile_75, count_str
 
 
 def clean_results(raw_candidates: list[dict]) -> list[dict]:
@@ -184,12 +96,6 @@ def expand_info(ids_and_labels):
 
     results = {}
 
-    (
-        queries_percentile_25,
-        queries_percentile_75,
-        _cnt_str,
-    ) = get_queries_usage_percentiles("sql_node")
-
     allowed_labels = set(Labels.LIST_OF_ALL)
     for label, ids in groupby(
         sorted(items, key=lambda d: str(d.get("label") or "").strip()),
@@ -230,8 +136,7 @@ def expand_info(ids_and_labels):
                                  ) as item'
                         ],
                         'with n RETURN n{{ .*}} as item ',
-                        {{n:n, sql_type: $sql_type, usage_percentile_25: $usage_percentile_25,
-                        usage_percentile_75: $usage_percentile_75, {queries_for_columns_params_keys} }}
+                        {{n:n, sql_type: $sql_type, {queries_for_columns_params_keys} }}
                         )
                     YIELD value as response
                     WITH collect(response.item) as all_items
@@ -240,8 +145,6 @@ def expand_info(ids_and_labels):
         params = {
             "sql_type": Labels.SQL,
             "label_id_pairs": label_id_pairs_for_current_label,
-            "usage_percentile_25": queries_percentile_25,
-            "usage_percentile_75": queries_percentile_75,
         }
         params.update(queries_for_columns_params)
         result = get_neo4j_conn().query_read(
