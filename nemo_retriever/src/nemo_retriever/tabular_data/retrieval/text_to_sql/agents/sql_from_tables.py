@@ -35,7 +35,7 @@ class SQLFromTablesAgent(BaseAgent):
     """
     Agent that generates SQL from table schemas.
 
-    This agent is used when no suitable attribute snippets are available.
+    This agent is used when no suitable semantic entities are available.
     It builds SQL from table schemas and similar questions.
 
     Input Requirements:
@@ -58,7 +58,7 @@ class SQLFromTablesAgent(BaseAgent):
         Generate SQL from table schemas.
 
         Uses table schemas and similar questions to generate SQL
-        when no attribute snippets are available.
+        when no semantic entities are available.
 
         Args:
             state: Current agent state

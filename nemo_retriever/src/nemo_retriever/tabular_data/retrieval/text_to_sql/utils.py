@@ -254,7 +254,7 @@ def get_candidates_information(
     retriever: "Retriever",
     entity: str,
     k: int = 5,
-    list_of_semantic: list | None = None,
+    list_of_semantic: list | None = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN],
 ):
     """
     Vector search over LanceDB, then merge graph properties from ``expand_info``.
@@ -262,8 +262,6 @@ def get_candidates_information(
     Matches the call shape used by ``extract_candidates``:
     ``get_candidates_information(retriever, text, k=..., list_of_semantic=[...])``.
     """
-    if list_of_semantic is None:
-        list_of_semantic = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN]
     labels = list_of_semantic
     results: list[dict] = []
 
