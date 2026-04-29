@@ -5,7 +5,7 @@ This agent prepares and fetches all candidates needed for SQL construction.
 It runs before SQL generation agents to gather all necessary context.
 
 Responsibilities:
-- Fetch relevant tables and foreign keys from candidates
+- Fetch relevant tables from candidates
 - Retrieve relevant queries for context
 - Filter and process complex candidates (custom analyses)
 - Store all prepared data in path_state for downstream agents
@@ -26,10 +26,9 @@ from nemo_retriever.tabular_data.retrieval.text_to_sql.state import (
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import (
     Labels,
-    apply_foreign_key_hints,
     dedupe_merge_relevant_tables,
-    get_relevant_fks_from_candidates_tables,
     get_relevant_tables,
+    get_relevant_tables_from_candidates,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,16 +49,15 @@ class CandidatePreparationAgent(BaseAgent):
     Agent that prepares and fetches all candidates for SQL construction.
 
     This agent gathers all necessary context before SQL generation:
-    - Relevant tables and foreign keys
+    - Relevant tables
     - Relevant queries for context
     - Similar questions from conversation history
 
 
     Output:
     - path_state["candidates"]: Flat list of candidate dicts (same as retrieved, enriched)
-    - path_state["tables_rows"]: Output of ``get_relevant_fks_from_candidates_tables``
+    - path_state["relevant_tables"]: Deduplicated list of relevant table dicts
         (same per-table dict shape as ``get_relevant_tables``)
-    - path_state["relevant_fks"]: Flat list of FK relationship dicts
     - path_state["relevant_queries"]: Relevant queries for context
     - path_state["similar_questions"]: Similar questions from history
     - path_state["custom_analyses"]: Filtered complex candidates
@@ -84,7 +82,7 @@ class CandidatePreparationAgent(BaseAgent):
         """
         Prepare and fetch all candidates for SQL construction.
 
-        Gathers tables, foreign keys, queries, similar questions, and processes complex candidates.
+        Gathers tables, queries, similar questions, and processes complex candidates.
 
         Args:
             state: Current agent state
@@ -97,19 +95,17 @@ class CandidatePreparationAgent(BaseAgent):
         question = get_question_for_processing(state)
         candidates = list(path_state.get("retrieved_candidates") or [])
 
-        relevant_tables, relevant_fks = get_relevant_fks_from_candidates_tables(candidates)
+        relevant_tables = get_relevant_tables_from_candidates(candidates)
 
-        additional_tables, additional_fks = get_relevant_tables(
+        additional_tables = get_relevant_tables(
             state["retriever"],
             question,
             k=5,
         )
 
         relevant_tables.extend(additional_tables)
-        relevant_fks.extend(additional_fks)
         relevant_tables = dedupe_merge_relevant_tables(relevant_tables)
-        apply_foreign_key_hints(relevant_tables, relevant_fks)
-        self.logger.info(f"Found {len(relevant_tables)} relevant tables and {len(relevant_fks)} foreign keys")
+        self.logger.info(f"Found {len(relevant_tables)} relevant tables")
 
         relevant_queries = _extract_relevant_queries(
             candidates,
@@ -126,7 +122,6 @@ class CandidatePreparationAgent(BaseAgent):
             "path_state": {
                 **path_state,
                 "relevant_tables": relevant_tables,
-                "relevant_fks": relevant_fks,
                 "relevant_queries": relevant_queries,
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,

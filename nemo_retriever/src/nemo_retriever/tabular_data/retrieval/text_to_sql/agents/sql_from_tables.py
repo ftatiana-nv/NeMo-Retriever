@@ -12,7 +12,7 @@ Responsibilities:
 
 Design Decisions:
 - Used when no suitable snippets are found
-- Relies on table schemas and foreign key relationships
+- Relies on table schemas
 - Can incorporate similar questions from history for context
 """
 
@@ -36,7 +36,7 @@ class SQLFromTablesAgent(BaseAgent):
     Agent that generates SQL from table schemas.
 
     This agent is used when no suitable attribute snippets are available.
-    It builds SQL from table schemas, foreign key relationships, and similar questions.
+    It builds SQL from table schemas and similar questions.
 
     Input Requirements:
     - path_state["relevant_tables"]: Optional relevant tables (if not provided, will search)
@@ -57,7 +57,7 @@ class SQLFromTablesAgent(BaseAgent):
         """
         Generate SQL from table schemas.
 
-        Uses table schemas, foreign keys, and similar questions to generate SQL
+        Uses table schemas and similar questions to generate SQL
         when no attribute snippets are available.
 
         Args:
@@ -79,7 +79,7 @@ class SQLFromTablesAgent(BaseAgent):
         # Get relevant tables (search if not already available)
         relevant_tables = path_state.get("relevant_tables", [])
         if not relevant_tables:
-            relevant_tables, _ = get_relevant_tables(
+            relevant_tables = get_relevant_tables(
                 state["retriever"],
                 question,
             )
@@ -90,7 +90,6 @@ class SQLFromTablesAgent(BaseAgent):
             dialect=connector.dialect,
             main_question=question,
             observation_block="",
-            fks=[],  # Foreign keys can be added if needed
             queries=[],  # Relevant queries can be added if needed
             tables=format_tables_for_prompt(relevant_tables),
             qa_from_conversations=similar_questions,

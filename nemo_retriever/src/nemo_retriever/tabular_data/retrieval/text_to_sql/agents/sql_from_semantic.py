@@ -2,7 +2,7 @@
 SQL generation from semantic retrieval context.
 
 Builds SQL from graph-backed semantic candidates (custom analyses, columns),
-prepared tables/FKs, and optional file extraction — not from ad-hoc “snippet”
+prepared tables, and optional file extraction — not from ad-hoc “snippet”
 assembly alone.
 
 Responsibilities:
@@ -83,10 +83,6 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         if "primary_key" in table:
             table_parts.append(f"  Primary Key: {table['primary_key']}")
 
-        # Foreign key
-        if "foreign_key" in table:
-            table_parts.append(f"  Foreign Key: {table['foreign_key']}")
-
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
@@ -119,12 +115,12 @@ class SQLFromCandidatesAgent(BaseAgent):
     """
     Agent that constructs SQL from semantic retrieval and prepared schema context.
 
-    Uses candidates, table groups, FKs, and related signals produced by
+    Uses candidates, table groups, and related signals produced by
     CandidatePreparationAgent, then prompts the LLM to produce SQL
 
     Input Requirements:
     - path_state["retrieved_candidates"]: Candidate dicts from preparation
-    - path_state["relevant_tables"] / relevant_fks: schema context
+    - path_state["relevant_tables"]: schema context
     - path_state["relevant_queries"]: Relevant queries (from CandidatePreparationAgent)
 
     Output:
@@ -149,7 +145,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         """
         Construct SQL from semantic candidates and prepared schema context.
 
-        Uses CandidatePreparationAgent outputs (candidates, tables, FKs, queries,
+        Uses CandidatePreparationAgent outputs (candidates, tables, queries,
         similar questions). May return a text response when the model does not emit SQL.
 
         Args:
@@ -167,7 +163,6 @@ class SQLFromCandidatesAgent(BaseAgent):
         question = get_question_for_processing(state)
 
         relevant_tables = path_state.get("relevant_tables", [])
-        relevant_fks = path_state.get("relevant_fks", [])
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])
         custom_analyses = path_state.get("custom_analyses", [])
@@ -181,7 +176,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             """
             Build messages for SQL construction.
 
-            Includes semantic candidate context, FKs, similar questions, and optionally
+            Includes semantic candidate context, similar questions, and optionally
             extracted file data or file excerpts.
             """
             observation_block = f"\nlist of important semantic entities with sql snippets:\n{custom_analyses_str}\n"
@@ -191,9 +186,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 dialect=connector.dialect,
                 main_question=question,
                 observation_block=observation_block,
-                fks=[
-                    f"{item['table1']}.{item['column1']} = {item['table2']}.{item['column2']}" for item in relevant_fks
-                ],
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=format_tables_for_prompt(relevant_tables),

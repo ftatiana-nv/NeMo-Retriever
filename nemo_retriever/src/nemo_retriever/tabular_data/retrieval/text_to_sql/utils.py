@@ -536,135 +536,6 @@ def format_response(candidates, response):
     return final_response_highlighted
 
 
-def get_relevant_fks(tables_ids):
-    # Build a connected graph by expanding from target tables through FK relationships
-    query = f"""
-    // Start with target tables and expand outward to find connected tables
-    WITH $tables_ids as current_ids
-
-    // Level 1: Find tables connected via FK
-    OPTIONAL MATCH (t0:{Labels.TABLE} WHERE t0.id IN current_ids)
-          -[:schema]->(:{Labels.COLUMN})-[:fk]-(:{Labels.COLUMN})<-[:schema]-(t1:{Labels.TABLE})
-    WITH current_ids, collect(DISTINCT t1.id) as new_ids_1
-    WITH current_ids + new_ids_1 as level_1_ids
-
-    // Level 2
-    OPTIONAL MATCH (t1:{Labels.TABLE} WHERE t1.id IN level_1_ids)
-          -[:schema]->(:{Labels.COLUMN})-[:fk]-(:{Labels.COLUMN})<-[:schema]-(t2:{Labels.TABLE})
-    WITH level_1_ids, collect(DISTINCT t2.id) as new_ids_2
-    WITH level_1_ids + new_ids_2 as level_2_ids
-
-    // Level 3
-    OPTIONAL MATCH (t2:{Labels.TABLE} WHERE t2.id IN level_2_ids)
-          -[:schema]->(:{Labels.COLUMN})-[:fk]-(:{Labels.COLUMN})<-[:schema]-(t3:{Labels.TABLE})
-    WITH level_2_ids, collect(DISTINCT t3.id) as new_ids_3
-    WITH level_2_ids + new_ids_3 as all_table_ids
-
-    // Get all FK relationships between these tables
-    MATCH (t1:{Labels.TABLE})-[:schema]->(col1:{Labels.COLUMN})-[:fk]-(col2:{Labels.COLUMN})
-        <-[:schema]-(t2:{Labels.TABLE})
-    WHERE t1.id IN all_table_ids AND t2.id IN all_table_ids
-      AND t1.id < t2.id  // Avoid duplicates by keeping only one direction
-
-    RETURN collect(DISTINCT {{
-        table1: t1.schema_name + '.' + t1.name,
-        column1: col1.name,
-        column1_datatype: coalesce(col1.data_type, 'None'),
-        table2: t2.schema_name + '.' + t2.name,
-        column2: col2.name,
-        column2_datatype: coalesce(col2.data_type, 'None')
-    }}) as list_of_foreign_keys
-    """
-    results = get_neo4j_conn().query_read(query, {"tables_ids": tables_ids})
-    if len(results) > 0:
-        result_fks = results[0]["list_of_foreign_keys"]
-    else:
-        result_fks = []
-
-    # Build a connected graph by expanding from target tables through FK relationships
-    query = f"""
-    // Start with target tables and expand outward to find connected tables
-
-    // Level 1: Find tables connected via FK
-    OPTIONAL MATCH (t0:{Labels.TABLE} WHERE t0.id IN $tables_ids)-[:join]-(t1:{Labels.TABLE})
-    WITH collect(DISTINCT t1.id) as new_ids_1
-    WITH $tables_ids + new_ids_1 as level_1_ids
-
-    // Level 2
-    OPTIONAL MATCH (t1:{Labels.TABLE} WHERE t1.id IN level_1_ids)-[:join]-(t2:{Labels.TABLE})
-    WITH level_1_ids, collect(DISTINCT t2.id) as new_ids_2
-    WITH level_1_ids + new_ids_2 as level_2_ids
-
-    // Level 3
-    OPTIONAL MATCH (t2:{Labels.TABLE} WHERE t2.id IN level_2_ids)-[:join]-(t3:{Labels.TABLE})
-    WITH level_2_ids, collect(DISTINCT t3.id) as new_ids_3
-    WITH level_2_ids + new_ids_3 as all_table_ids
-
-    // Get all join relationships between these tables and parse the join property
-    MATCH (t1:{Labels.TABLE})-[rel:join]-(t2:{Labels.TABLE})
-    WHERE t1.id IN all_table_ids AND t2.id IN all_table_ids
-      AND t1.id < t2.id  // Avoid duplicates by keeping only one direction
-      AND rel.join IS NOT NULL
-
-    // Parse the join property: split by operators and extract left/right sides
-    WITH t1, t2, rel,
-         trim(apoc.text.split(rel.join, '<=|>=|=|<|>')[0]) as left_side,
-         trim(apoc.text.split(rel.join, '<=|>=|=|<|>')[1]) as right_side
-
-    // Parse left side: SCHEMA.TABLE.COLUMN (handle potential whitespace)
-    WITH t1, t2, rel, left_side, right_side,
-         trim(split(left_side, '.')[0]) as left_schema,
-         trim(split(left_side, '.')[1]) as left_table,
-         trim(split(left_side, '.')[2]) as left_column,
-         trim(split(right_side, '.')[0]) as right_schema,
-         trim(split(right_side, '.')[1]) as right_table,
-         trim(split(right_side, '.')[2]) as right_column
-    WHERE left_schema IS NOT NULL AND left_table IS NOT NULL AND left_column IS NOT NULL
-      AND right_schema IS NOT NULL AND right_table IS NOT NULL AND right_column IS NOT NULL
-
-    // Match the actual column nodes for left side
-    OPTIONAL MATCH (s1:{Labels.SCHEMA} {{name: left_schema}})
-        -[:schema]->(tbl1:{Labels.TABLE} {{name: left_table}})
-        -[:schema]->(col1:{Labels.COLUMN} {{name: left_column}})
-
-    // Match the actual column nodes for right side
-    OPTIONAL MATCH (s2:{Labels.SCHEMA} {{name: right_schema}})
-        -[:schema]->(tbl2:{Labels.TABLE} {{name: right_table}})
-        -[:schema]->(col2:{Labels.COLUMN} {{name: right_column}})
-
-    // Return the structured format
-    RETURN collect(DISTINCT {{
-        table1: t1.schema_name + '.' + t1.name,
-        column1: coalesce(col1.name, left_column),
-        column1_datatype: coalesce(col1.data_type, 'None'),
-        table2: t2.schema_name + '.' + t2.name,
-        column2: coalesce(col2.name, right_column),
-        column2_datatype: coalesce(col2.data_type, 'None')
-    }}) as list_of_foreign_keys
-    """
-    results = get_neo4j_conn().query_read(query, {"tables_ids": tables_ids})
-    if len(results) > 0:
-        result_joins = results[0]["list_of_foreign_keys"]
-    else:
-        result_joins = []
-    results = result_fks + result_joins
-
-    # Convert to JSON strings, use set to remove duplicates, then convert back
-    unique_strings = set(json.dumps(d, sort_keys=True) for d in results)
-    unique_results = [json.loads(s) for s in unique_strings]
-
-    key_order = [
-        "table1",
-        "column1",
-        "column1_datatype",
-        "table2",
-        "column2",
-        "column2_datatype",
-    ]
-    sorted_results = [{key: d[key] for key in key_order} for d in unique_results]
-    return sorted_results
-
-
 def _parse_table_text(text: str) -> dict:
     """Parse db_name, schema_name, table_name, and columns from LanceDB-style table text."""
     parsed: dict = {}
@@ -744,8 +615,6 @@ def get_all_schemas_ids():
 
 
 def get_schemas_by_ids(relevant_schemas_ids: list = None):
-    ## This function is for sql validations in the app - (for example metrics or analyses sql validations)
-    ## in these cases we get a slim version of the data so the validation is faster
     before_get_all = time.time()
     data_array = get_schemas_from_graph_by_ids(relevant_schemas_ids)
     logger.info(f"time took to get all data from graph: {time.time() - before_get_all}")
@@ -877,7 +746,7 @@ def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
             elif not sa and sb:
                 out[k] = v
             continue
-        if k in ("foreign_key", "primary_key"):
+        if k == "primary_key":
             if not out.get(k) and v:
                 out[k] = v
             continue
@@ -909,28 +778,18 @@ def dedupe_merge_relevant_tables(tables: list[dict]) -> list[dict]:
     return merged
 
 
-def apply_foreign_key_hints(tables: list[dict], relevant_fks: list) -> None:
-    """Set ``foreign_key`` on tables when name matches FK side (same as ``get_relevant_tables``)."""
-    for table in tables:
-        for fk in relevant_fks:
-            if table["name"] == fk["table1"]:
-                table["foreign_key"] = f"'{table['name']}.{fk['column1']}' = '{fk['table2']}.{fk['column2']}'"
-
-
-def get_relevant_fks_from_candidates_tables(
+def get_relevant_tables_from_candidates(
     candidates: list[dict],
-) -> tuple[list[dict], list[dict]]:
+) -> list[dict]:
     """
-    Extract tables and foreign keys from flat candidate dicts.
+    Extract relevant tables from flat candidate dicts.
 
     Reads ``relevant_tables`` on each candidate (when present), deduplicates by table id,
-    calls :func:`get_relevant_fks` for those table ids, then removes
-    ``relevant_tables`` from each candidate in place.
+    then removes ``relevant_tables`` from each candidate in place.
 
     Returns:
-        ``(relevant_tables, relevant_fks)`` — same table dict shape as :func:`get_relevant_tables`
-        (``name``, ``label``, ``id``, ``table_info``, parsed fields, optional ``primary_key``,
-        optional ``foreign_key``), and ``relevant_fks`` as returned by :func:`get_relevant_fks`.
+        List of normalized table dicts — same shape as :func:`get_relevant_tables`
+        (``name``, ``label``, ``id``, ``table_info``, parsed fields, optional ``primary_key``).
     """
     table_by_id: dict[str, dict] = {}
 
@@ -950,33 +809,21 @@ def get_relevant_fks_from_candidates_tables(
             if tid_s not in table_by_id:
                 table_by_id[tid_s] = table
 
-    def _strip_relevant_tables() -> None:
-        for cand in candidates:
-            if isinstance(cand, dict) and "relevant_tables" in cand:
-                cand.pop("relevant_tables", None)
+    for cand in candidates:
+        if isinstance(cand, dict) and "relevant_tables" in cand:
+            cand.pop("relevant_tables", None)
 
     if not table_by_id:
-        _strip_relevant_tables()
-        return [], []
+        return []
 
-    relevant_tables = [_normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id]
-    relevant_fks: list[dict] = []
-    try:
-        relevant_fks = get_relevant_fks([x["id"] for x in relevant_tables])
-    except Exception:
-        logger.exception("get_relevant_fks failed for candidate tables")
-        relevant_fks = []
-
-    apply_foreign_key_hints(relevant_tables, relevant_fks)
-    _strip_relevant_tables()
-    return relevant_tables, relevant_fks
+    return [_normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id]
 
 
 def get_relevant_tables(
     retriever: "Retriever",
     initial_question,
     k=15,
-):
+) -> list[dict]:
     """Semantic search over the same LanceDB index as candidate retrieval, label ``table`` only."""
     try:
         raw_rows = search_lancedb_semantic_index(
@@ -1010,16 +857,7 @@ def get_relevant_tables(
         )
         relevant_tables_list.append(entry)
 
-    relevant_fks: list = []
-    if relevant_tables_list:
-        try:
-            relevant_fks = get_relevant_fks([x["id"] for x in relevant_tables_list])
-        except Exception:
-            logger.exception("get_relevant_fks failed in get_relevant_tables")
-            relevant_fks = []
-    apply_foreign_key_hints(relevant_tables_list, relevant_fks)
-
-    return relevant_tables_list, relevant_fks
+    return relevant_tables_list
 
 
 def prepare_link(name: str, id: str, label: Labels, parent_id: str = None) -> str:
