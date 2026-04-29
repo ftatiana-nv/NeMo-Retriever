@@ -56,7 +56,7 @@ def _get_llm_client() -> ChatNVIDIA:
     return ChatNVIDIA(
         base_url=os.environ.get("LLM_INVOKE_URL"),
         api_key=api_key,
-        model=os.environ.get("LLM_MODEL", "meta/llama-3.1-70b-instruct"),
+        model=os.environ.get("LLM_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
     )
 
 
