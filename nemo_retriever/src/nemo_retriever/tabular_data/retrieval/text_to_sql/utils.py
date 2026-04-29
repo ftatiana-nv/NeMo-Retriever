@@ -52,11 +52,10 @@ COLUMNS_USAGE_PERCENTILE = "columns_usage_percentile"
 
 
 def _get_llm_client() -> ChatNVIDIA:
-    api_key = os.environ.get("NVIDIA_API_KEY")
     return ChatNVIDIA(
-        base_url=os.environ.get("LLM_INVOKE_URL"),
-        api_key=api_key,
-        model=os.environ.get("LLM_MODEL", "nvidia/nemotron-3-nano-30b-a3b"),
+        base_url=os.environ.get("BASE_URL"),
+        api_key=os.environ.get("NVIDIA_API_KEY"),
+        model=os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b"),
     )
 
 
