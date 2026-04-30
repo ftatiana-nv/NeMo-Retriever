@@ -64,6 +64,20 @@ class JoinPair:
 
 
 @dataclass
+class UnionPair:
+    """Two columns aligned at the same position in a UNION/UNION ALL.
+
+    Represents the semantic equivalence implied by positional alignment
+    in set operations (UNION, UNION ALL, INTERSECT, EXCEPT).
+    """
+
+    left_table: str
+    left_column: str
+    right_table: str
+    right_column: str
+
+
+@dataclass
 class ExtractionResult:
     """Container for the full output of :func:`extract_tables_and_columns`.
 
@@ -77,11 +91,15 @@ class ExtractionResult:
     joins:
         Equi-join column pairs extracted from explicit ``JOIN … ON``
         and ``JOIN … USING`` clauses, with aliases fully resolved.
+    unions:
+        Column pairs aligned at the same position in UNION/UNION ALL
+        set operations, with aliases fully resolved.
     """
 
     tables: dict[str, TableMatch] = field(default_factory=dict)
     ast_node_count: int = 0
     joins: list[JoinPair] = field(default_factory=list)
+    unions: list[UnionPair] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +388,87 @@ def _extract_join_pairs(
     return pairs
 
 
+def _extract_union_pairs(
+    qualified: exp.Expression,
+    alias_map: dict[str, str],
+    source_table_names: set[str],
+) -> list[UnionPair]:
+    """Extract positionally-aligned column pairs from UNION/UNION ALL/INTERSECT/EXCEPT.
+
+    For each set operation, columns at the same SELECT-list position across
+    all branches are paired.  Only direct column references are included;
+    computed expressions (functions, aggregations) are skipped.
+    """
+
+    def _flatten_union(node: exp.Expression) -> list[exp.Select]:
+        """Recursively collect all SELECT branches from nested set operations."""
+        if isinstance(node, exp.Select):
+            return [node]
+        if isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
+            return _flatten_union(node.left) + _flatten_union(node.right)
+        return []
+
+    def _resolve_select_col(
+        expr: exp.Expression,
+    ) -> tuple[str | None, str | None]:
+        """Resolve a SELECT-list expression to (real_table, col_name) or (None, None)."""
+        if isinstance(expr, exp.Alias):
+            source_expr = expr.this
+        else:
+            source_expr = expr
+        if not isinstance(source_expr, exp.Column):
+            return None, None
+        col_name = source_expr.name.lower()
+        tbl_ref = source_expr.table.lower() if source_expr.table else None
+        real_table = alias_map.get(tbl_ref) if tbl_ref else None
+        if real_table and real_table in source_table_names:
+            return real_table, col_name
+        return None, None
+
+    pairs: list[UnionPair] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    for union_node in qualified.find_all(exp.Union, exp.Intersect, exp.Except):
+        # Only process from the top-level set-op to avoid double-counting
+        # nested unions (the flatten call handles recursion).
+        if isinstance(union_node.parent, (exp.Union, exp.Intersect, exp.Except)):
+            continue
+
+        branches = _flatten_union(union_node)
+        if len(branches) < 2:
+            continue
+
+        # Resolve each branch's SELECT list to (table, col) tuples
+        resolved_branches: list[list[tuple[str | None, str | None]]] = []
+        for branch in branches:
+            resolved_branches.append([_resolve_select_col(expr) for expr in branch.expressions])
+
+        # Pair columns across branches at each position
+        n_cols = min(len(b) for b in resolved_branches)
+        for pos in range(n_cols):
+            resolved_at_pos = [
+                (tbl, col)
+                for b in resolved_branches
+                if (tbl := b[pos][0]) is not None and (col := b[pos][1]) is not None
+            ]
+            # Create pairs between all distinct resolved columns at this position
+            for i in range(len(resolved_at_pos)):
+                for j in range(i + 1, len(resolved_at_pos)):
+                    lt, lc = resolved_at_pos[i]
+                    rt, rc = resolved_at_pos[j]
+                    if lt == rt and lc == rc:
+                        continue
+                    # Canonical order
+                    if (lt, lc) > (rt, rc):
+                        lt, lc, rt, rc = rt, rc, lt, lc
+                    key = (lt, lc, rt, rc)
+                    if key not in seen:
+                        seen.add(key)
+                        pairs.append(UnionPair(left_table=lt, left_column=lc, right_table=rt, right_column=rc))
+
+    return pairs
+
+
 # ---------------------------------------------------------------------------
 # Main extraction function
 # ---------------------------------------------------------------------------
@@ -572,10 +671,12 @@ def extract_tables_and_columns(
             # else: ambiguous — omit rather than guess.
 
     join_pairs = _extract_join_pairs(qualified, alias_map, source_table_names, cte_names)
+    union_pairs = _extract_union_pairs(qualified, alias_map, source_table_names)
 
     # Drop real-table entries that ended up with no columns attributed.
     return ExtractionResult(
         tables={k: v for k, v in result.items() if v.columns},
         ast_node_count=ast_node_count,
         joins=join_pairs,
+        unions=union_pairs,
     )

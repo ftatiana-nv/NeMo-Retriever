@@ -46,7 +46,7 @@ def prepare_edge(edge):
 
     check_properties_compatibility_with_neo4j(node_from, node_to, edge[2])
 
-    if e_label == Edges.JOIN:
+    if e_label in (Edges.JOIN, Edges.UNION):
         edge_identity_props = {}
     elif "child_idx" in edge_props and edge_props["child_idx"] is not None:
         edge_identity_props = {"child_idx": edge_props["child_idx"]}
@@ -119,6 +119,8 @@ def add_edges(edges_data):
             case
               when data.edge_props.join_refs is not null
                 then {join_refs: coalesce(rel.join_refs, []) + data.edge_props.join_refs}
+              when data.edge_props.union_refs is not null
+                then {union_refs: coalesce(rel.union_refs, []) + data.edge_props.union_refs}
               else data.edge_props
             end as props
             SET rel = props

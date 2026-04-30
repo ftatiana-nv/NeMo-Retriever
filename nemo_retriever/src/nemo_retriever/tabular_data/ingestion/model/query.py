@@ -22,6 +22,7 @@ class Query:
         self.edges: list = []
         self.ast_node_count: int = 0
         self.join_count: int = 0
+        self.union_count: int = 0
 
         month = ltimestamp.month
         year = ltimestamp.year
@@ -66,6 +67,10 @@ class Query:
     def get_join_count(self) -> int:
         """Number of join pairs extracted from the SQL by sqlglot."""
         return self.join_count
+
+    def get_union_count(self) -> int:
+        """Number of union pairs extracted from the SQL by sqlglot."""
+        return self.union_count
 
     def get_edges(self) -> list:
         return self.edges

@@ -10,6 +10,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor import (
     JoinPair,
     TableMatch,
+    UnionPair,
     extract_tables_and_columns,
 )
 
@@ -529,3 +530,94 @@ def test_canonical_order_consistent():
 def test_empty_sql_returns_no_joins():
     result = extract_tables_and_columns("", all_schemas=_ALL_SCHEMAS)
     assert result.joins == []
+
+
+# ---------------------------------------------------------------------------
+# UNION edge tests
+# ---------------------------------------------------------------------------
+
+
+def _union_set(pairs: list[UnionPair]) -> set[tuple[str, str, str, str]]:
+    """Canonical set of (lt, lc, rt, rc) tuples for easy assertions."""
+    return {(p.left_table, p.left_column, p.right_table, p.right_column) for p in pairs}
+
+
+def test_simple_union():
+    """Two-branch UNION pairs positional columns."""
+    sql = """
+    SELECT customer_id, customer_unique_id FROM customers
+    UNION
+    SELECT order_id, order_status FROM orders
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    unions = _union_set(result.unions)
+    assert ("customers", "customer_id", "orders", "order_id") in unions
+    assert ("customers", "customer_unique_id", "orders", "order_status") in unions
+    assert len(unions) == 2
+
+
+def test_union_all():
+    """UNION ALL produces the same pairs as UNION."""
+    sql = """
+    SELECT customer_id, customer_unique_id FROM customers
+    UNION ALL
+    SELECT order_id, order_status FROM orders
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    unions = _union_set(result.unions)
+    assert ("customers", "customer_id", "orders", "order_id") in unions
+    assert ("customers", "customer_unique_id", "orders", "order_status") in unions
+    assert len(unions) == 2
+
+
+def test_three_way_union():
+    """Three-branch UNION produces pairs across all branches."""
+    sql = """
+    SELECT customer_id FROM customers
+    UNION
+    SELECT order_id FROM orders
+    UNION ALL
+    SELECT order_id FROM order_items
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    unions = _union_set(result.unions)
+    assert ("customers", "customer_id", "orders", "order_id") in unions
+    assert ("customers", "customer_id", "order_items", "order_id") in unions
+    assert ("order_items", "order_id", "orders", "order_id") in unions
+    assert len(unions) == 3
+
+
+def test_union_excludes_function_columns():
+    """Computed columns in UNION branches are excluded from pairs."""
+    sql = """
+    SELECT customer_id, customer_id || '-' || customer_unique_id AS combo FROM customers
+    UNION
+    SELECT order_id, order_status FROM orders
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    unions = _union_set(result.unions)
+    # Position 0: customer_id ↔ order_id (both real columns)
+    assert ("customers", "customer_id", "orders", "order_id") in unions
+    # Position 1: combo is computed — no pair created
+    assert len(unions) == 1
+
+
+def test_union_no_set_op_returns_empty():
+    """A query without UNION produces no union pairs."""
+    sql = "SELECT customer_id FROM customers"
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    assert result.unions == []
+
+
+def test_except_produces_union_pairs():
+    """EXCEPT set operation also produces positional pairs."""
+    sql = """
+    SELECT customer_id, customer_unique_id FROM customers
+    EXCEPT
+    SELECT order_id, order_status FROM orders
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    unions = _union_set(result.unions)
+    assert ("customers", "customer_id", "orders", "order_id") in unions
+    assert ("customers", "customer_unique_id", "orders", "order_status") in unions
+    assert len(unions) == 2
