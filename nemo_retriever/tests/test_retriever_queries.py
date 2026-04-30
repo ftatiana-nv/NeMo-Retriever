@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ class TestQueriesNoReranking:
     def _run_queries(self, retriever, query_texts, fake_vectors, fake_hits):
         """Patch embed + search helpers and call queries()."""
         with (
-            patch.object(retriever, "_embed_queries_local", return_value=fake_vectors),
+            patch.object(retriever, "_embed_queries_local_hf", return_value=fake_vectors),
             patch.object(retriever, "_search_lancedb", return_value=fake_hits),
         ):
             return retriever.queries(query_texts)
@@ -120,7 +121,7 @@ class TestQueriesNoReranking:
     def test_embed_local_hf_called_with_query_texts(self):
         r = _make_retriever()
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]) as mock_embed,
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]) as mock_embed,
             patch.object(r, "_search_lancedb", return_value=[_make_hits(5)]),
         ):
             r.queries(["hello world"])
@@ -143,7 +144,7 @@ class TestQueriesNoReranking:
         r = _make_retriever()
         vecs = [[0.1, 0.2, 0.3, 0.4]]
         with (
-            patch.object(r, "_embed_queries_local", return_value=vecs),
+            patch.object(r, "_embed_queries_local_hf", return_value=vecs),
             patch.object(r, "_search_lancedb", return_value=[_make_hits(5)]) as mock_search,
         ):
             r.queries(["my query"])
@@ -155,7 +156,7 @@ class TestQueriesNoReranking:
     def test_embedder_override_forwarded(self):
         r = _make_retriever()
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]) as mock_embed,
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]) as mock_embed,
             patch.object(r, "_search_lancedb", return_value=[_make_hits(5)]),
         ):
             r.queries(["q"], embedder="custom/embedder")
@@ -165,7 +166,7 @@ class TestQueriesNoReranking:
     def test_lancedb_uri_and_table_overrides_forwarded(self):
         r = _make_retriever()
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]),
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]),
             patch.object(r, "_search_lancedb", return_value=[_make_hits(5)]) as mock_search,
         ):
             r.queries(["q"], lancedb_uri="/tmp/db", lancedb_table="my-table")
@@ -173,40 +174,6 @@ class TestQueriesNoReranking:
         kwargs = mock_search.call_args[1]
         assert kwargs["lancedb_uri"] == "/tmp/db"
         assert kwargs["lancedb_table"] == "my-table"
-
-
-# ---------------------------------------------------------------------------
-# local_query_embed_backend (HF vs vLLM for local query vectors)
-# ---------------------------------------------------------------------------
-
-
-class TestLocalQueryEmbedBackend:
-    def test_invalid_backend_raises(self):
-        with pytest.raises(ValueError, match="local_query_embed_backend"):
-            _make_retriever(local_query_embed_backend="nope")
-
-    def test_hf_text_model_uses_create_local_query_embedder(self, monkeypatch):
-        recorded: list[tuple[str, str]] = []
-
-        def fake_cq(_model_name: str, *, backend: str = "auto", **_kwargs):
-            recorded.append(("cq", backend))
-            m = MagicMock()
-            import torch
-
-            m.embed_queries.return_value = torch.zeros(1, 2)
-            return m
-
-        def fake_ce(*_a, **_k):
-            recorded.append(("ce", "vllm"))
-            raise AssertionError("create_local_embedder should not run for hf text backend")
-
-        monkeypatch.setattr("nemo_retriever.model.create_local_query_embedder", fake_cq)
-        monkeypatch.setattr("nemo_retriever.model.create_local_embedder", fake_ce)
-
-        r = _make_retriever(local_query_embed_backend="hf")
-        r._get_local_embedder("nvidia/llama-nemotron-embed-1b-v2")
-        r._get_local_embedder("nvidia/llama-nemotron-embed-1b-v2")
-        assert recorded == [("cq", "hf")]
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +190,6 @@ class TestQuerySingleConvenience:
 
         mock_queries.assert_called_once_with(
             ["find something"],
-            top_k=None,
             embedder=None,
             lancedb_uri=None,
             lancedb_table=None,
@@ -235,9 +201,7 @@ class TestQuerySingleConvenience:
         with patch.object(r, "queries", return_value=[[]]) as mock_queries:
             r.query("q", embedder="e", lancedb_uri="u", lancedb_table="t")
 
-        mock_queries.assert_called_once_with(
-            ["q"], top_k=None, embedder="e", lancedb_uri="u", lancedb_table="t"
-        )
+        mock_queries.assert_called_once_with(["q"], embedder="e", lancedb_uri="u", lancedb_table="t")
 
 
 # ---------------------------------------------------------------------------
@@ -264,20 +228,20 @@ class TestQueriesWithEndpointReranking:
         fake_results = self._fake_search_results(r)
 
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]),
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]),
             patch.object(r, "_search_lancedb", return_value=fake_results),
             patch.object(r, "_rerank_results", return_value=[_make_hits(3)]) as mock_rerank,
         ):
             r.queries(["q"])
 
-        mock_rerank.assert_called_once_with(["q"], fake_results, top_k=r.top_k)
+        mock_rerank.assert_called_once_with(["q"], fake_results)
 
     def test_rerank_not_called_when_reranker_is_none(self):
         r = _make_retriever(reranker=None)
         fake_results = [_make_hits(5)]
 
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]),
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]),
             patch.object(r, "_search_lancedb", return_value=fake_results),
             patch.object(r, "_rerank_results") as mock_rerank,
         ):
@@ -291,7 +255,7 @@ class TestQueriesWithEndpointReranking:
         reranked = [_make_hits(3)]
 
         with (
-            patch.object(r, "_embed_queries_local", return_value=[_DUMMY_VECTOR]),
+            patch.object(r, "_embed_queries_local_hf", return_value=[_DUMMY_VECTOR]),
             patch.object(r, "_search_lancedb", return_value=fake_results),
             patch.object(r, "_rerank_results", return_value=reranked),
         ):
@@ -311,7 +275,7 @@ class TestQueriesWithEndpointReranking:
         }
 
         with patch("requests.post", return_value=mock_resp) as mock_post:
-            out = r._rerank_results(["q"], [fake_hits], top_k=r.top_k)
+            out = r._rerank_results(["q"], [fake_hits])
 
         mock_post.assert_called()
         # Results should be sorted descending
@@ -333,7 +297,7 @@ class TestQueriesWithLocalReranking:
         fake_model.score.return_value = [0.1, 0.9, 0.5, 0.3]
 
         with patch.object(r, "_get_reranker_model", return_value=fake_model):
-            out = r._rerank_results(["q"], [hits], top_k=r.top_k)
+            out = r._rerank_results(["q"], [hits])
 
         scores = [h["_rerank_score"] for h in out[0]]
         assert scores == sorted(scores, reverse=True)
@@ -346,7 +310,7 @@ class TestQueriesWithLocalReranking:
         fake_model.score.return_value = [0.1, 0.9, 0.5, 0.3]
 
         with patch.object(r, "_get_reranker_model", return_value=fake_model):
-            out = r._rerank_results(["q"], [hits], top_k=r.top_k)
+            out = r._rerank_results(["q"], [hits])
 
         assert len(out[0]) == 2
 
@@ -358,7 +322,7 @@ class TestQueriesWithLocalReranking:
         fake_model.score.side_effect = [[0.2, 0.8], [0.6, 0.4]]
 
         with patch.object(r, "_get_reranker_model", return_value=fake_model):
-            out = r._rerank_results(["q1", "q2"], [hits_a, hits_b], top_k=r.top_k)
+            out = r._rerank_results(["q1", "q2"], [hits_a, hits_b])
 
         assert len(out) == 2
         # Each per-query list should be sorted descending
@@ -460,15 +424,14 @@ class TestSearchLancedbKeepKeys:
                 lancedb_table="t",
                 query_vectors=[_DUMMY_VECTOR],
                 query_texts=["q"],
-                top_k=r.top_k,
             )
 
         hit = results[0][0]
         assert set(hit.keys()) <= _KEEP_KEYS
         assert "vector" not in hit
+        assert "_distance" not in hit
         assert "_rowid" not in hit
         assert hit["text"] == "hello"
-        assert hit["_distance"] == 0.42
 
     def test_extra_keys_stripped_from_hybrid_results(self):
         from nemo_retriever.retriever import _KEEP_KEYS
@@ -508,7 +471,6 @@ class TestSearchLancedbKeepKeys:
                 lancedb_table="t",
                 query_vectors=[_DUMMY_VECTOR],
                 query_texts=["q"],
-                top_k=r.top_k,
             )
 
         hit = results[0][0]
