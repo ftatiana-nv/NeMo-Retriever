@@ -366,6 +366,166 @@ def test_derived_table_join():
     assert ("order_items", "order_id", "orders", "order_id") in joins
 
 
+def test_different_column_names_join():
+    """Join on differently-named columns (e.g. link_to_major = major_id)."""
+    sql = """
+    SELECT T2.major_name
+    FROM member AS T1
+    INNER JOIN major AS T2 ON T1.link_to_major = T2.major_id
+    WHERE T1.first_name = 'Angela'
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    assert len(result.joins) == 1
+    jp = result.joins[0]
+    assert {jp.left_column, jp.right_column} == {"link_to_major", "major_id"}
+    assert jp.operator == "="
+
+
+def test_multi_table_chain_join():
+    """4-table join chain extracts 3 distinct edges."""
+    sql = """
+    SELECT T4.first_name, T4.last_name
+    FROM event AS T1
+    INNER JOIN budget AS T2 ON T1.event_id = T2.link_to_event
+    INNER JOIN expense AS T3 ON T2.budget_id = T3.link_to_budget
+    INNER JOIN member AS T4 ON T3.link_to_member = T4.member_id
+    WHERE T1.event_name = 'Yearly Kickoff'
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    joins = _join_set(result.joins)
+    assert len(joins) == 3
+    assert ("budget", "link_to_event", "event", "event_id") in joins
+    assert ("budget", "budget_id", "expense", "link_to_budget") in joins
+    assert ("expense", "link_to_member", "member", "member_id") in joins
+
+
+def test_multiple_conditions_in_on():
+    """JOIN with multiple conditions in ON produces multiple edges."""
+    sql = """
+    SELECT T1.superhero_name
+    FROM superhero AS T1
+    INNER JOIN colour AS T2 ON T1.eye_colour_id = T2.id AND T1.hair_colour_id = T2.id
+    WHERE T2.colour = 'Black'
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    joins = _join_set(result.joins)
+    assert len(joins) == 2
+    assert ("colour", "id", "superhero", "eye_colour_id") in joins
+    assert ("colour", "id", "superhero", "hair_colour_id") in joins
+
+
+def test_left_join():
+    """LEFT JOIN extracts join edges the same way as INNER JOIN."""
+    sql = """
+    SELECT T2.School, T1.AvgScrWrite
+    FROM schools AS T2
+    LEFT JOIN satscores AS T1 ON T2.CDSCode = T1.cds
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    assert len(result.joins) == 1
+    jp = result.joins[0]
+    assert {jp.left_column, jp.right_column} == {"cdscode", "cds"}
+    assert jp.operator == "="
+
+
+def test_except_with_join():
+    """EXCEPT query: joins are extracted from both sides."""
+    sql = """
+    SELECT T1.event_name FROM event AS T1
+    INNER JOIN attendance AS T2 ON T1.event_id = T2.link_to_event
+    GROUP BY T1.event_id HAVING COUNT(T2.link_to_event) > 10
+    EXCEPT
+    SELECT T1.event_name FROM event AS T1 WHERE T1.type = 'Meeting'
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    joins = _join_set(result.joins)
+    assert ("attendance", "link_to_event", "event", "event_id") in joins
+
+
+def test_derived_table_from_sample():
+    """Derived table: single-level subquery in JOIN traces to source table."""
+    sql = """
+    SELECT t2.name, t1.total_matches
+    FROM League AS t2
+    JOIN (
+        SELECT league_id, COUNT(id) AS total_matches
+        FROM Match
+        GROUP BY league_id
+    ) AS t1 ON t1.league_id = t2.id
+    """
+    result = extract_tables_and_columns(sql, dialect="sqlite", all_schemas={})
+    joins = _join_set(result.joins)
+    assert ("league", "id", "match", "league_id") in joins
+
+
+def test_derived_table_function_column_excluded():
+    """A derived column built from a function (concatenation) must not produce a join edge."""
+    sql = """
+    SELECT o.order_id, d.full_name
+    FROM orders o
+    JOIN (
+        SELECT customer_id, firstname || ' ' || lastname AS full_name
+        FROM customers
+    ) d ON o.customer_name = d.full_name
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    joins = _join_set(result.joins)
+    # full_name is a concatenation of two columns — not a real column, no edge
+    assert len(joins) == 0
+
+
+def test_cte_join_traces_to_real_table():
+    """A CTE pass-through column resolves to the real source table for join edges."""
+    sql = """
+    WITH order_stats AS (
+        SELECT customer_id, SUM(amount) AS total
+        FROM orders
+        GROUP BY customer_id
+    )
+    SELECT c.name, os.total
+    FROM customers c
+    JOIN order_stats os ON c.customer_id = os.customer_id
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    joins = _join_set(result.joins)
+    # os.customer_id traces back to orders.customer_id
+    assert ("customers", "customer_id", "orders", "customer_id") in joins
+    # os.total is SUM(amount) — no edge for it
+    assert all("total" not in jp and "amount" not in jp for jp in joins)
+    assert len(joins) == 1
+
+
+def test_cte_function_column_excluded():
+    """A CTE computed column (concatenation) must not produce a join edge."""
+    sql = """
+    WITH enriched AS (
+        SELECT customer_id, firstname || ' ' || lastname AS full_name
+        FROM customers
+    )
+    SELECT o.order_id, e.full_name
+    FROM orders o
+    JOIN enriched e ON o.customer_name = e.full_name
+    """
+    result = extract_tables_and_columns(sql, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    joins = _join_set(result.joins)
+    assert len(joins) == 0
+
+
+def test_canonical_order_consistent():
+    """Same join written in opposite direction produces identical JoinPair."""
+    sql_a = """
+    SELECT a.order_id FROM orders a JOIN customers b ON a.customer_id = b.customer_id
+    """
+    sql_b = """
+    SELECT b.customer_id FROM customers b JOIN orders a ON b.customer_id = a.customer_id
+    """
+    result_a = extract_tables_and_columns(sql_a, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    result_b = extract_tables_and_columns(sql_b, dialect="duckdb", all_schemas=_ALL_SCHEMAS)
+    assert _join_set(result_a.joins) == _join_set(result_b.joins)
+    assert result_a.joins[0].left_table == result_b.joins[0].left_table
+    assert result_a.joins[0].right_table == result_b.joins[0].right_table
+
+
 def test_empty_sql_returns_no_joins():
     result = extract_tables_and_columns("", all_schemas=_ALL_SCHEMAS)
     assert result.joins == []

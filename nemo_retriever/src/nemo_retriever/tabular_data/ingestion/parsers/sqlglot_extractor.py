@@ -165,15 +165,51 @@ def _build_derived_col_map(
     qualified: exp.Expression,
     alias_map: dict[str, str],
     source_table_names: set[str],
+    cte_names: set[str],
 ) -> dict[str, dict[str, tuple[str, str]]]:
-    """Map derived-table aliases to their output columns' real source.
+    """Map derived-table/CTE aliases to their output columns' real source.
 
     For ``(SELECT order_items.order_id, ... FROM order_items) AS d``, produces:
     ``{"d": {"order_id": ("order_items", "order_id"), ...}}``
 
-    Only maps columns that trace unambiguously to a single real source table.
+    Also handles CTEs:
+    ``WITH stats AS (SELECT customer_id FROM orders) ... JOIN stats s``
+    produces ``{"stats": {"customer_id": ("orders", "customer_id")}}``
+    and registers any outer-query aliases (``"s"``) pointing to the same map.
+
+    Only maps columns that are direct references (not wrapped in functions
+    or aggregations).  Computed columns like ``SUM(price) AS total`` are
+    excluded — they don't represent real table columns.
     """
     derived: dict[str, dict[str, tuple[str, str]]] = {}
+
+    def _map_select(inner_select: exp.Select) -> dict[str, tuple[str, str]]:
+        """Extract pass-through column mappings from a SELECT list."""
+        col_map: dict[str, tuple[str, str]] = {}
+        for expr in inner_select.expressions:
+            if isinstance(expr, exp.Alias):
+                output_name = expr.alias.lower()
+                source_expr = expr.this
+            else:
+                source_expr = expr
+                output_name = None
+            # Only bare column references pass; functions/aggregations
+            # (SUM, COUNT, CONCAT, etc.) are excluded — they don't
+            # represent real table columns.
+            if not isinstance(source_expr, exp.Column):
+                continue
+            if output_name is None:
+                output_name = source_expr.name.lower() if source_expr.name else None
+            if not output_name:
+                continue
+            # Resolve through alias_map to get the real table name
+            tbl_ref = source_expr.table.lower() if source_expr.table else None
+            real_table = alias_map.get(tbl_ref) if tbl_ref else None
+            if real_table and real_table in source_table_names:
+                col_map[output_name] = (real_table, source_expr.name.lower())
+        return col_map
+
+    # Inline derived tables: (SELECT ...) AS d
     for subq in qualified.find_all(exp.Subquery):
         alias = subq.alias.lower() if subq.alias else None
         if not alias:
@@ -181,23 +217,30 @@ def _build_derived_col_map(
         inner_select = subq.find(exp.Select)
         if not inner_select:
             continue
-        col_map: dict[str, tuple[str, str]] = {}
-        for expr in inner_select.expressions:
-            output_name = expr.alias.lower() if isinstance(expr, exp.Alias) else None
-            source_expr = expr.this if isinstance(expr, exp.Alias) else expr
-            col = _unwrap_column(source_expr)
-            if col is None:
-                continue
-            if output_name is None:
-                output_name = col.name.lower() if col.name else None
-            if not output_name:
-                continue
-            tbl_ref = col.table.lower() if col.table else None
-            real_table = alias_map.get(tbl_ref) if tbl_ref else None
-            if real_table and real_table in source_table_names:
-                col_map[output_name] = (real_table, col.name.lower())
+        col_map = _map_select(inner_select)
         if col_map:
             derived[alias] = col_map
+
+    # CTEs: WITH cte_name AS (SELECT ...)
+    for cte in qualified.find_all(exp.CTE):
+        cte_name = cte.alias.lower() if cte.alias else None
+        if not cte_name:
+            continue
+        inner_select = cte.this if isinstance(cte.this, exp.Select) else cte.this.find(exp.Select)
+        if not inner_select:
+            continue
+        col_map = _map_select(inner_select)
+        if col_map:
+            derived[cte_name] = col_map
+
+    # Register outer-query aliases that reference CTEs (e.g. JOIN stats AS s → "s")
+    for table in qualified.find_all(exp.Table):
+        name = table.name.lower()
+        if name in cte_names and table.alias:
+            tbl_alias = table.alias.lower()
+            if name in derived and tbl_alias != name:
+                derived[tbl_alias] = derived[name]
+
     return derived
 
 
@@ -205,6 +248,7 @@ def _extract_join_pairs(
     qualified: exp.Expression,
     alias_map: dict[str, str],
     source_table_names: set[str],
+    cte_names: set[str],
 ) -> list[JoinPair]:
     """Extract join column pairs from the (post-qualify) AST.
 
@@ -218,9 +262,9 @@ def _extract_join_pairs(
     * Binary comparisons (``=``, ``>``, ``>=``, ``<``, ``<=``, ``!=``)
     * ``BETWEEN … AND …``
     * Function-wrapped / cast-wrapped columns (e.g. ``LOWER(t.col)``)
-    * Columns referencing derived tables (traced back to source real table)
+    * Columns referencing derived tables / CTEs (traced back to source real table)
     """
-    derived_map = _build_derived_col_map(qualified, alias_map, source_table_names)
+    derived_map = _build_derived_col_map(qualified, alias_map, source_table_names, cte_names)
     pairs: list[JoinPair] = []
     seen: set[tuple[str, str, str, str]] = set()
 
@@ -527,7 +571,7 @@ def extract_tables_and_columns(
                     result[tbl].columns.add(col_name)
             # else: ambiguous — omit rather than guess.
 
-    join_pairs = _extract_join_pairs(qualified, alias_map, source_table_names)
+    join_pairs = _extract_join_pairs(qualified, alias_map, source_table_names, cte_names)
 
     # Drop real-table entries that ended up with no columns attributed.
     return ExtractionResult(
