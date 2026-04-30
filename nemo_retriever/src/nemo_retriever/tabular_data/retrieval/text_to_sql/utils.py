@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 MAX_CALCULATION_CANDIDATES = 15
 
 
-
-
 def get_llm_client() -> ChatNVIDIA:
     return ChatNVIDIA(
         base_url=os.environ.get("BASE_URL"),
@@ -329,11 +327,14 @@ def extract_candidates(
     combined_custom: list[dict] = []
     combined_columns: list[dict] = []
     for text in pulls:
-        all_hits = get_candidates_information(
-            retriever,
-            text,
-            list_of_semantic=target_labels,
-        ) or []
+        all_hits = (
+            get_candidates_information(
+                retriever,
+                text,
+                list_of_semantic=target_labels,
+            )
+            or []
+        )
         for hit in all_hits:
             lab = str(hit.get("label") or "")
             if lab == Labels.CUSTOM_ANALYSIS:
