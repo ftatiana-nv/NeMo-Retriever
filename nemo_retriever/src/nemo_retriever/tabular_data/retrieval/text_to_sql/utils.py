@@ -7,7 +7,7 @@ import os
 import re
 import time
 from itertools import groupby
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 import pandas as pd
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -850,72 +850,3 @@ def prepare_link(name: str, id: str, label: Labels, parent_id: str = None) -> st
             return f"data/{parent_id}?searchId={id}|{name}"
         case _:
             return f"data/{id}|{name}"
-
-
-_INFRA_AUTH_ERROR_PATTERNS = [
-    # Snowflake
-    "insufficient privileges",
-    "incorrect username or password",
-    "user temporarily locked",
-    "user is not found",
-    "saml response is invalid",
-    "failed to connect",
-    "connection refused",
-    "connection reset",
-    "network is unreachable",
-    "no trusted certificate found",
-    "ssl peer certificate",
-    "ssh remote key",
-    "failed to find the root",
-    "broken pipe",
-    "remote host terminated",
-    "target server failed",
-    "communication error",
-    # MSSQL
-    "login failed",
-    "cannot open database",
-    "user does not have permission",
-    "the server was not found or was not accessible",
-    "error locating server/instance",
-    "could not open a connection",
-    "timeout expired",
-    "cannot generate sspi context",
-    "insufficient system memory",
-    "filegroup is full",
-    "transaction log for database is full",
-    "access denied",
-    # Databricks
-    "permission_denied",
-    "does not have permission",
-    "not authorized",
-    "user not authorized",
-    "invalid access token",
-    "unauthorized",
-    "forbidden",
-    "authentication failed",
-    "connection timed out",
-    "host not found",
-    "no route to host",
-    "out of memory",
-    "memory limit exceeded",
-    "no space left on device",
-    "insufficient capacity",
-    "quota exceeded",
-]
-
-_INFRA_AUTH_RE = re.compile(
-    "|".join(re.escape(p) for p in _INFRA_AUTH_ERROR_PATTERNS),
-    re.IGNORECASE,
-)
-
-
-def is_infra_or_auth_error(error: Union[Exception, str]) -> bool:
-    """Return True if *error* looks like an infrastructure / auth problem
-    rather than a SQL logic mistake the agent could fix."""
-    msg = str(error)
-    logger.error("Error from query execution: %s", msg)
-
-    if re.search(r"^'?Connection [\w-]+ not found'?$", msg, re.IGNORECASE):
-        return True
-
-    return bool(_INFRA_AUTH_RE.search(msg))

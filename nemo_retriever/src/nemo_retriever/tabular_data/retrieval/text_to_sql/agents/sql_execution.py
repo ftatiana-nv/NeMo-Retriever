@@ -7,7 +7,6 @@ Executes validated SQL via the injected DB connector.
 import logging
 from typing import Any, Dict, Optional
 
-from nemo_retriever.tabular_data.retrieval.text_to_sql.utils import is_infra_or_auth_error
 from nemo_retriever.tabular_data.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentState
 
@@ -71,14 +70,10 @@ class SQLExecutionAgent(BaseAgent):
 
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)
-            if not is_infra_or_auth_error(response_from_db.error):
-                path_state["error"] = response_from_db.error
-                return {"decision": "invalid_sql", "path_state": path_state}
-            self.logger.warning("Infra/auth error during execution: %s", response_from_db.error)
-            response_from_db = None
+            path_state["error"] = response_from_db.error
+            return {"decision": "invalid_sql", "path_state": path_state}
 
-        db_result = response_from_db.result if response_from_db else None
         return {
             "decision": "valid_sql",
-            "path_state": {**path_state, "sql_response_from_db": db_result},
+            "path_state": {**path_state, "sql_response_from_db": response_from_db.result},
         }
