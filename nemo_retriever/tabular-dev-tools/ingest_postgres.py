@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "nemo_retriever" / "tabular-dev-tools"))
+from apply_metadata import apply_metadata  # noqa: E402
 from postgres_connector import PostgresDatabase  # noqa: E402
 from nemo_retriever.graph import Graph
 from nemo_retriever.graph.lancedb_sink import LanceDBWriterActor
@@ -113,6 +114,8 @@ def run_ingest() -> None:
         logger.info("Tabular ingest result: %d rows written to LanceDB", len(result_df))
     else:
         logger.info("Tabular ingest result: no rows produced")
+
+    apply_metadata(connector.database_name)
 
 
 def run_retrieve() -> None:
