@@ -9,9 +9,9 @@ Usage::
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
-
 import sys
 from pathlib import Path
 
@@ -72,9 +72,20 @@ def _conn_string(db: str) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
-def ingest(database: str = DATABASE) -> None:
-    """Ingest Postgres database into Neo4j and LanceDB."""
-    connector = PostgresDatabase(_conn_string(database))
+_CONNECTOR: PostgresDatabase | None = None
+
+
+def _get_connector() -> PostgresDatabase:
+    """Open the Postgres connection lazily and reuse across phases."""
+    global _CONNECTOR
+    if _CONNECTOR is None:
+        _CONNECTOR = PostgresDatabase(_conn_string(DATABASE))
+    return _CONNECTOR
+
+
+def run_ingest() -> None:
+    """Ingest the Postgres schema into Neo4j and write embeddings to LanceDB."""
+    connector = _get_connector()
 
     TABULAR_PARAMS = TabularExtractParams(
         connector=connector,
@@ -103,6 +114,11 @@ def ingest(database: str = DATABASE) -> None:
     else:
         logger.info("Tabular ingest result: no rows produced")
 
+
+def run_retrieve() -> None:
+    """Run the text-to-SQL agent against the previously ingested LanceDB."""
+    connector = _get_connector()
+    lancedb_kwargs = VDB_PARAMS.vdb_kwargs
     retriever = Retriever(
         vdb="lancedb",
         vdb_kwargs={
@@ -127,9 +143,29 @@ def ingest(database: str = DATABASE) -> None:
     logger.info("get_agent_response result: %s", agent_result)
 
 
+_ALL_MODES = ("ingest", "retrieve")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--mode",
+        choices=_ALL_MODES,
+        nargs="*",
+        default=None,
+        help="Phases to run. Pass one or more (e.g. --mode ingest retrieve). " "Default: run all phases.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    ingest()
+    args = _parse_args()
+    modes = args.mode if args.mode else _ALL_MODES
+    if "ingest" in modes:
+        run_ingest()
+    if "retrieve" in modes:
+        run_retrieve()
