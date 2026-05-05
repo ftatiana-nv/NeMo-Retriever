@@ -137,7 +137,7 @@ dev = [
 
 # ── Convenience: full install ─────────────────────────────────────────────────
 all = [
-  "nemo_retriever[local,multimedia,stores,benchmarks,llm]",
+  "nemo_retriever[local,multimedia,tabular,benchmarks,llm]",
 ]
 
 [project.scripts]
