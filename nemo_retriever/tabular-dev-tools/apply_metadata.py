@@ -69,7 +69,7 @@ def apply_metadata(database_name: str) -> None:
         raw = json.load(f)
 
     table_rows: list[dict[str, str]] = []
-    column_rows: list[dict[str, str | None]] = []
+    column_rows: list[dict[str, str | list[str] | None]] = []
     samples_count = 0
     for table_name, table_meta in raw.items():
         table_desc = table_meta.get("description")
@@ -79,10 +79,8 @@ def apply_metadata(database_name: str) -> None:
         for col in table_meta.get("columns", []) or []:
             col_desc = col.get("description")
             value_examples = col.get("value_examples")
-            sample_values = (
-                ", ".join(str(v) for v in value_examples)
-                if isinstance(value_examples, list) and value_examples
-                else None
+            sample_values: list[str] | None = (
+                [str(v) for v in value_examples] if isinstance(value_examples, list) and value_examples else None
             )
             if not col_desc and sample_values is None:
                 continue
