@@ -91,14 +91,21 @@ def run_ingest() -> None:
     TABULAR_PARAMS = TabularExtractParams(
         connector=connector,
     )
-    graph = (
+
+    extract_graph = (
         Graph()
         >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+    )
+    extract_graph.execute(None)
+
+    apply_metadata(connector.database_name)
+
+    embed_graph = (
+        Graph()
         >> TabularFetchEmbeddingsOp(database_name=connector.database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-
-    results = graph.execute(None)
+    results = embed_graph.execute(None)
     result_df = results[0] if results else None
 
     lancedb_kwargs = VDB_PARAMS.vdb_kwargs
@@ -114,8 +121,6 @@ def run_ingest() -> None:
         logger.info("Tabular ingest result: %d rows written to LanceDB", len(result_df))
     else:
         logger.info("Tabular ingest result: no rows produced")
-
-    apply_metadata(connector.database_name)
 
 
 def run_retrieve() -> None:
