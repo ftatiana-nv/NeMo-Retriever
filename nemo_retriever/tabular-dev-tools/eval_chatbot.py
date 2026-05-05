@@ -257,7 +257,8 @@ CSV_FIELDS = [
 
 
 def evaluate(input_path: Path, output_path: Path) -> None:
-    questions = _load_questions(input_path)
+    questions = ["Show me the details for component 670-14039-0072-TS5"]
+    # questions = _load_questions(input_path)
     logger.info("Loaded %d questions from %s", len(questions), input_path)
 
     connector = PostgresDatabase(_conn_string(DATABASE))

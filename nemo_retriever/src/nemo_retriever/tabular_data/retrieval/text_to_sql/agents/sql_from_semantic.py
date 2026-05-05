@@ -94,10 +94,13 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
                     col_name = col.get("name", "UNKNOWN")
                     col_type = col.get("data_type", "UNKNOWN")
                     col_desc = col.get("description", "")
+                    sample_values = col.get("sample_values")
 
                     col_line = f"    - {col_name} ({col_type})"
                     if col_desc:
                         col_line += f" - {col_desc}"
+                    if sample_values:
+                        col_line += f" | sample values: {sample_values}"
                     table_parts.append(col_line)
                 elif isinstance(col, str):
                     # If column is a string, use it directly
