@@ -110,7 +110,7 @@ multimedia = [
 # ── Independent extras ───────────────────────────────────────────────────────
 
 # SQL and graph storage backends (lancedb is in core deps).
-stores = [
+tabular = [
   "duckdb>=1.2.0",
   "duckdb-engine>=0.13.0",
   "neo4j>=5.0",
